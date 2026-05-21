@@ -1,0 +1,5 @@
+name=AutoCrank
+author=Pierre
+description=A pocket-sized autobattler. Stack absurd synergies, win 10 in a row.
+bundleID=com.pierre.autocrank
+imagePath=images

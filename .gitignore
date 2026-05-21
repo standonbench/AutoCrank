@@ -1,0 +1,6 @@
+build/
+AutoCrank.pdx/
+Source/pdex.dylib
+Source/pdex.elf
+Source/pdex.bin
+.DS_Store
