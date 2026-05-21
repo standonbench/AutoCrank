@@ -3,6 +3,18 @@
 static TriggerEvent g_q[TRIG_QUEUE_MAX];
 static uint8_t g_head, g_tail;
 
+// Wrap game.player in a BattleState so shop-context triggers can use the
+// same handler dispatch as battle. The opponent side is left empty so
+// "all enemies" effects safely no-op in the shop.
+void trig_shop_drain(void) {
+    static BattleState tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    tmp.teams[0] = game.player;
+    for (int i = 0; i < TEAM_SIZE; i++) tmp.teams[1].slots[i].id = EMPTY_PET;
+    trig_drain(&tmp);
+    game.player = tmp.teams[0];
+}
+
 void trig_reset(void) {
     g_head = g_tail = 0;
 }

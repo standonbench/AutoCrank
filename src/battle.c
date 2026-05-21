@@ -28,27 +28,53 @@ static int frontmost_alive(Team* t) {
 
 static bool any_alive(Team* t) { return frontmost_alive(t) >= 0; }
 
-// Apply pending faints: emit FAINT events, fire TRIG_FAINT triggers.
-// Returns true if at least one pet fainted.
+// Resolve faints iteratively so cascading deaths (Hedgehog AoE → more deaths
+// → more triggers) all fire. The dying pet's slot stays "alive" until AFTER
+// its FAINT handler runs, so Mouse/Cricket/Sheep etc. can act on their own
+// death. If the handler replaced the pet in-slot (Cricket→Zombie Cricket),
+// the slot is NOT cleared.
 static bool resolve_faints(BattleState* bs)
 {
-    bool any = false;
-    for (int side = 0; side < 2; side++) {
-        for (int s = 0; s < TEAM_SIZE; s++) {
-            PetSlot* p = &bs->teams[side].slots[s];
-            if (p->id != EMPTY_PET && p->hp <= 0) {
-                battle_log_push(BEV_FAINT, (uint8_t)side, (uint8_t)s, 0, p->id);
-                trig_push(TRIG_FAINT, (uint8_t)side, (uint8_t)s, (uint8_t)s, 0);
-                trig_push(TRIG_FRIEND_FAINTS, (uint8_t)side, (uint8_t)s, (uint8_t)s, 0);
-                p->id = EMPTY_PET;
-                p->atk = 0;
-                p->hp = 0;
-                any = true;
+    bool anyEver = false;
+    int safety = 20;
+    while (safety-- > 0) {
+        bool any = false;
+        uint8_t dead[2][TEAM_SIZE];
+        for (int sd = 0; sd < 2; sd++)
+            for (int s = 0; s < TEAM_SIZE; s++) dead[sd][s] = EMPTY_PET;
+
+        for (int side = 0; side < 2; side++) {
+            for (int s = 0; s < TEAM_SIZE; s++) {
+                PetSlot* p = &bs->teams[side].slots[s];
+                if (p->id != EMPTY_PET && p->hp <= 0) {
+                    battle_log_push(BEV_FAINT, (uint8_t)side, (uint8_t)s, 0, p->id);
+                    trig_push(TRIG_FAINT, (uint8_t)side, (uint8_t)s, (uint8_t)s, p->id);
+                    trig_push(TRIG_FRIEND_FAINTS, (uint8_t)side, (uint8_t)s, (uint8_t)s, p->id);
+                    dead[side][s] = p->id;
+                    any = true;
+                    anyEver = true;
+                }
+            }
+        }
+        if (!any) break;
+        trig_drain(bs);
+        // Clear slots whose pet ID is unchanged (handler didn't replace it)
+        for (int side = 0; side < 2; side++) {
+            for (int s = 0; s < TEAM_SIZE; s++) {
+                PetSlot* p = &bs->teams[side].slots[s];
+                if (dead[side][s] != EMPTY_PET && p->id == dead[side][s]) {
+                    p->id = EMPTY_PET;
+                    p->atk = 0;
+                    p->hp = 0;
+                    p->level = 1;
+                    p->xp = 0;
+                    p->food = EMPTY_FOOD;
+                    p->flags = 0;
+                }
             }
         }
     }
-    if (any) trig_drain(bs);
-    return any;
+    return anyEver;
 }
 
 void battle_begin(void) {

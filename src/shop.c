@@ -38,8 +38,9 @@ bool shop_try_buy_pet(uint8_t shopSlot, uint8_t teamSlot) {
     if (game.shop.gold < PET_COST) return false;
 
     PetSlot* dst = &game.player.slots[teamSlot];
+    bool wasFresh = false;
+    bool leveledUp = false;
     if (dst->id == EMPTY_PET) {
-        // Place fresh
         const PetDef* def = pet_def(petId);
         dst->id = petId;
         dst->level = 1;
@@ -48,27 +49,39 @@ bool shop_try_buy_pet(uint8_t shopSlot, uint8_t teamSlot) {
         dst->hp = def->baseHp;
         dst->food = EMPTY_FOOD;
         dst->flags = 0;
+        wasFresh = true;
     } else if (dst->id == petId && dst->level < MAX_PET_LEVEL) {
-        // Combine: +1 XP, +1/+1 stats per absorb
         dst->xp++;
         dst->atk = (int16_t)mini(dst->atk + 1, STAT_CAP);
         dst->hp  = (int16_t)mini(dst->hp + 1, STAT_CAP);
-        // Check for level up
         int needed = pet_xp_for_level((uint8_t)(dst->level + 1));
         if (dst->xp >= needed) {
             dst->level++;
-            // SAP gives a small extra +1/+1 on level up too.
             dst->atk = (int16_t)mini(dst->atk + 1, STAT_CAP);
             dst->hp  = (int16_t)mini(dst->hp + 1, STAT_CAP);
+            leveledUp = true;
         }
     } else {
-        // Cannot place (occupied by different pet, or already maxed)
         return false;
     }
 
     game.shop.pets[shopSlot] = EMPTY_PET;
     game.shop.gold -= PET_COST;
     sfx_buy();
+
+    // Fire BUY trigger (Cow, Dragon care about this). data = bought pet's tier.
+    const PetDef* boughtDef = pet_def(petId);
+    int boughtTier = boughtDef ? boughtDef->tier : 0;
+    trig_push(TRIG_BUY, 0, teamSlot, teamSlot, (int16_t)boughtTier);
+    if (wasFresh) {
+        // FRIEND_SUMMONED for Dog/Horse buffs; srcSlot identifies the newly
+        // summoned pet (matching battle-time convention).
+        trig_push(TRIG_FRIEND_SUMMONED, 0, teamSlot, teamSlot, petId);
+    }
+    if (leveledUp) {
+        trig_push(TRIG_LEVEL_UP, 0, teamSlot, teamSlot, 0);
+    }
+    trig_shop_drain();
     return true;
 }
 
@@ -94,12 +107,15 @@ bool shop_try_sell(uint8_t teamSlot) {
     if (teamSlot >= TEAM_SIZE) return false;
     PetSlot* p = &game.player.slots[teamSlot];
     if (p->id == EMPTY_PET) return false;
-    int refund = 1 + p->level - 1;  // 1g for L1, 2g for L2, 3g for L3
+    int refund = 1 + p->level - 1;
     if (refund < 1) refund = 1;
     game.shop.gold += refund;
+    // Fire SELL trigger before clearing
+    trig_push(TRIG_SELL, 0, teamSlot, teamSlot, p->id);
     p->id = EMPTY_PET;
     p->level = 1; p->xp = 0; p->atk = 0; p->hp = 0;
     p->food = EMPTY_FOOD; p->flags = 0;
+    trig_shop_drain();
     sfx_sell();
     return true;
 }
@@ -123,10 +139,18 @@ void shop_toggle_freeze_food(uint8_t shopSlot) {
 }
 
 void shop_end_turn_advance(void) {
+    // Fire END_OF_TURN for the team's pets (Frog/Parrot care).
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        if (game.player.slots[i].id != EMPTY_PET) {
+            trig_push(TRIG_END_OF_TURN, 0, (uint8_t)i, (uint8_t)i, 0);
+        }
+    }
+    trig_shop_drain();
+
     game.turn++;
     game.shop.gold = STARTING_GOLD;
     game.shop.frozenPets = 0;
-    game.shop.frozenFoods = 0;  // foods melt after turn
+    game.shop.frozenFoods = 0;
     shop_refill();
 }
 

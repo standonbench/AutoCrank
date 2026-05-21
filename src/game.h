@@ -266,6 +266,7 @@ void team_shift(uint8_t fromSlot, int delta);
 void trig_reset(void);
 void trig_push(TriggerKind kind, uint8_t side, uint8_t srcSlot, uint8_t dataSlot, int16_t data);
 void trig_drain(BattleState* bs);
+void trig_shop_drain(void);
 
 // pets.c
 const PetDef* pet_def(uint8_t id);
