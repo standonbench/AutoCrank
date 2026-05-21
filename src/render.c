@@ -1,12 +1,46 @@
 #include "game.h"
 #include <stdio.h>
 
-#define CARD_W 56
-#define CARD_H 64
-#define SPRITE_DRAW_SIZE 32
+// ---------------------------------------------------------------------------
+// Layout constants — pet card is 60w x 84h. Five fit in 5*60 + 4*4 = 316,
+// leaving room for 2 food slots (32x40) on the right.
+// ---------------------------------------------------------------------------
+#define CARD_W       60
+#define CARD_H       92
+#define CARD_GAP      4
+#define SPRITE_SIZE  32
+
+#define TOPBAR_H     18
+
+#define FOOD_W       32
+#define FOOD_H       40
+
+extern bool g_debugOverlay;
 
 // ---------------------------------------------------------------------------
-// Pet card: 56x64 box, sprite on top, "atk/hp" stat strip on bottom.
+// Empty slot — dashed border
+// ---------------------------------------------------------------------------
+void render_empty_slot(int x, int y, bool selected)
+{
+    pd->graphics->setDrawMode(kDrawModeCopy);
+    GFX_FILL(x, y, CARD_W, CARD_H, kColorWhite);
+    // Dashed outline
+    for (int i = 0; i < CARD_W; i += 4) {
+        GFX_FILL(x + i, y,             2, 1, kColorBlack);
+        GFX_FILL(x + i, y + CARD_H - 1, 2, 1, kColorBlack);
+    }
+    for (int i = 0; i < CARD_H; i += 4) {
+        GFX_FILL(x,             y + i, 1, 2, kColorBlack);
+        GFX_FILL(x + CARD_W - 1, y + i, 1, 2, kColorBlack);
+    }
+    if (selected) {
+        GFX_RECT(x - 2, y - 2, CARD_W + 4, CARD_H + 4, kColorBlack);
+        GFX_RECT(x - 1, y - 1, CARD_W + 2, CARD_H + 2, kColorBlack);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pet card — solid outline, sprite/letter top, name middle, atk/hp bottom
 // ---------------------------------------------------------------------------
 void render_pet_card(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
                      uint8_t heldFood, int x, int y, bool selected)
@@ -16,188 +50,297 @@ void render_pet_card(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
         return;
     }
 
-    // Selection: thicker outline + invert background when selected.
-    GFX_FILL(x, y, CARD_W, CARD_H, selected ? kColorBlack : kColorWhite);
-    if (selected) {
-        // Inverted card: draw subsequent text in white-on-black via FillWhite mode.
-        pd->graphics->setDrawMode(kDrawModeFillWhite);
-    } else {
-        pd->graphics->setDrawMode(kDrawModeCopy);
-    }
+    pd->graphics->setDrawMode(kDrawModeCopy);
+    GFX_FILL(x, y, CARD_W, CARD_H, kColorWhite);
     GFX_RECT(x, y, CARD_W, CARD_H, kColorBlack);
 
-    // Sprite area (top 40 px). Center 32x32 in 56x40 region.
+    // Sprite / fallback letter area (centered, 32x32 at top)
+    int sx = x + (CARD_W - SPRITE_SIZE) / 2;
+    int sy = y + 6;
     LCDBitmap* bmp = image_pet(petId);
-    int sx = x + (CARD_W - SPRITE_DRAW_SIZE) / 2;
-    int sy = y + 4;
     if (bmp) {
         pd->graphics->drawScaledBitmap(bmp, sx, sy, 2.0f, 2.0f);
     } else {
-        // Stub: dotted square + first letter of name.
-        GFX_RECT(sx, sy, SPRITE_DRAW_SIZE, SPRITE_DRAW_SIZE,
-                 selected ? kColorWhite : kColorBlack);
+        // Stub: bordered square with a large centered letter
+        GFX_FILL(sx, sy, SPRITE_SIZE, SPRITE_SIZE, kColorWhite);
+        GFX_RECT(sx, sy, SPRITE_SIZE, SPRITE_SIZE, kColorBlack);
         const char* nm = pet_name(petId);
-        if (nm && nm[0] && game.fontLarge) {
-            pd->graphics->setFont(game.fontLarge);
+        if (nm && nm[0]) {
             char letter[2] = { nm[0], 0 };
-            pd->graphics->drawText(letter, 1, kASCIIEncoding, sx + 11, sy + 6);
+            LCDFont* f = game.fontLarge ? game.fontLarge : game.fontBold;
+            if (f) pd->graphics->setFont(f);
+            pd->graphics->setDrawMode(kDrawModeFillBlack);
+            // approximate centering (we don't have getTextWidth handy here)
+            pd->graphics->drawText(letter, 1, kASCIIEncoding, sx + 10, sy + 7);
+            pd->graphics->setDrawMode(kDrawModeCopy);
         }
     }
 
-    // Level dots (top-left of card)
+    // Level dots (top-left, outside sprite area)
     for (int i = 0; i < level && i < MAX_PET_LEVEL; i++) {
-        GFX_ELLIPSE(x + 2 + i * 5, y + 2, 4, 4, selected ? kColorWhite : kColorBlack);
+        pd->graphics->fillEllipse(x + 2 + i * 5, y + 2, 3, 3, 0, 360, kColorBlack);
     }
 
-    // Held food indicator (top-right of card)
+    // Held food indicator (top-right, small filled square)
     if (heldFood != EMPTY_FOOD) {
-        GFX_FILL(x + CARD_W - 8, y + 2, 6, 6, selected ? kColorWhite : kColorBlack);
+        GFX_FILL(x + CARD_W - 8, y + 2, 6, 6, kColorBlack);
     }
 
-    // Stat strip (bottom 18 px)
-    int statY = y + CARD_H - 16;
+    // Pet name (centered under sprite).
+    const char* nm = pet_name(petId);
+    if (nm) {
+        LCDFont* nf = game.fontSmall ? game.fontSmall : game.fontBold;
+        if (nf) pd->graphics->setFont(nf);
+        pd->graphics->setDrawMode(kDrawModeCopy);
+        int w = nf ? pd->graphics->getTextWidth(nf, nm, strlen(nm), kASCIIEncoding, 0)
+                   : (int)strlen(nm) * 6;
+        if (w <= 0) w = (int)strlen(nm) * 6;
+        int tx = x + (CARD_W - w) / 2;
+        if (tx < x) tx = x;
+        pd->graphics->drawText(nm, strlen(nm), kASCIIEncoding, tx, y + 42);
+    }
+
+    // Stat strip: bold "atk/hp" centered near the bottom
     char buf[16];
     snprintf(buf, sizeof(buf), "%d/%d", atk, hp);
     if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding,
-                           x + 6, statY);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+    int w = pd->graphics->getTextWidth(game.fontBold, buf, strlen(buf),
+                                       kASCIIEncoding, 0);
+    int tx = x + (CARD_W - w) / 2;
+    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, tx, y + CARD_H - 20);
 
-    // Restore default draw mode.
+    // Selection: thick double outline
+    if (selected) {
+        GFX_RECT(x - 2, y - 2, CARD_W + 4, CARD_H + 4, kColorBlack);
+        GFX_RECT(x - 1, y - 1, CARD_W + 2, CARD_H + 2, kColorBlack);
+    }
     pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
-void render_empty_slot(int x, int y, bool selected)
+// ---------------------------------------------------------------------------
+// Food slot (small, 32w x 40h)
+// ---------------------------------------------------------------------------
+static void render_food_slot(uint8_t foodId, int x, int y, bool selected, bool frozen)
 {
-    GFX_FILL(x, y, CARD_W, CARD_H, kColorWhite);
-    // Dashed border (procedural)
-    int color = kColorBlack;
-    for (int i = 0; i < CARD_W; i += 4) {
-        GFX_FILL(x + i, y, 2, 1, color);
-        GFX_FILL(x + i, y + CARD_H - 1, 2, 1, color);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+    GFX_FILL(x, y, FOOD_W, FOOD_H, kColorWhite);
+    GFX_RECT(x, y, FOOD_W, FOOD_H, kColorBlack);
+
+    if (foodId != EMPTY_FOOD) {
+        const char* nm = FOODS[foodId].name;
+        if (nm && nm[0]) {
+            char letter[2] = { nm[0], 0 };
+            if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
+            pd->graphics->setDrawMode(kDrawModeFillBlack);
+            pd->graphics->drawText(letter, 1, kASCIIEncoding, x + 11, y + 6);
+        }
+        char cb[8];
+        snprintf(cb, sizeof(cb), "%dg", FOODS[foodId].cost);
+        if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+        pd->graphics->setDrawMode(kDrawModeFillBlack);
+        pd->graphics->drawText(cb, strlen(cb), kASCIIEncoding, x + 6, y + 26);
     }
-    for (int i = 0; i < CARD_H; i += 4) {
-        GFX_FILL(x, y + i, 1, 2, color);
-        GFX_FILL(x + CARD_W - 1, y + i, 1, 2, color);
+    if (frozen) {
+        // Tiny black square top-right = frozen
+        GFX_FILL(x + FOOD_W - 6, y + 2, 4, 4, kColorBlack);
     }
     if (selected) {
-        // Solid outline on top of dashed
-        GFX_RECT(x - 1, y - 1, CARD_W + 2, CARD_H + 2, kColorBlack);
+        GFX_RECT(x - 2, y - 2, FOOD_W + 4, FOOD_H + 4, kColorBlack);
+        GFX_RECT(x - 1, y - 1, FOOD_W + 2, FOOD_H + 2, kColorBlack);
     }
+    pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
 // ---------------------------------------------------------------------------
-// Top bar: turn / gold / lives / wins
+// Top bar (turn / gold / lives / wins)
 // ---------------------------------------------------------------------------
 void render_topbar(void)
 {
-    GFX_FILL(0, 0, SCREEN_W, 18, kColorBlack);
+    GFX_FILL(0, 0, SCREEN_W, TOPBAR_H, kColorBlack);
     pd->graphics->setDrawMode(kDrawModeFillWhite);
     if (game.fontBold) pd->graphics->setFont(game.fontBold);
 
     char buf[64];
     snprintf(buf, sizeof(buf),
-             "T%d  G:%d  L:%d  W:%d/%d",
+             "TURN %d   GOLD %d   LIVES %d   WINS %d/%d",
              game.turn, game.shop.gold, game.lives, game.wins, WINS_TO_VICTORY);
-    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, 6, 2);
+    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, 8, 2);
 
     pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
 // ---------------------------------------------------------------------------
-// Shop screen layout
+// Debug overlay: shows cursor, selected slot, frame, state
+// ---------------------------------------------------------------------------
+static void render_debug_overlay(void)
+{
+    if (!g_debugOverlay) return;
+    int by = SCREEN_H - 14;
+    GFX_FILL(0, by, SCREEN_W, 14, kColorBlack);
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+             "[dbg] state=%d cursor=%d sel=%d frame=%lu",
+             (int)game.state, (int)game.cursor, (int)game.selectedTeamSlot,
+             (unsigned long)game.frameCount);
+    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, 4, by);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+}
+
+// ---------------------------------------------------------------------------
+// Shop screen
+// Layout (400x240):
+//   Top bar       : y=0,   h=18
+//   "SHOP" label  : y=20,  h=10  (small text)
+//   Shop pets row : y=32,  h=84  (5 cards x 60w, 4px gap), x starts at 4
+//   Foods (col)   : x=336, y=32, 2 stacked? or side-by-side. Use 2 side-by-side
+//   "TEAM" label  : y=124, h=10
+//   Team row      : y=136, h=84
+//   Action bar    : y=224, h=14
 // ---------------------------------------------------------------------------
 void render_shop_screen(void)
 {
     render_topbar();
 
-    // Shop row: 5 pets + 2 foods at y=24
-    int sx = 8;
-    int sy = 24;
+    // Shop pet row (just below top bar, no label needed — layout is clear)
+    int sx0 = 4;
+    int sy  = TOPBAR_H + 6;
     for (int i = 0; i < MAX_SHOP_PETS; i++) {
         bool sel = (game.cursor == i);
-        render_pet_card(game.shop.pets[i], 1, 0, 0, EMPTY_FOOD,
-                        sx + i * (CARD_W + 4), sy, sel);
-        if (game.shop.frozenPets & (1 << i)) {
-            // Snowflake-ish indicator (outline triangle)
-            int fx = sx + i * (CARD_W + 4) + CARD_W - 12;
-            int fy = sy + CARD_H - 14;
-            GFX_FILL(fx, fy, 8, 8, kColorBlack);
+        uint8_t pid = game.shop.pets[i];
+        int16_t a = 0, h = 0;
+        if (pid != EMPTY_PET) {
+            const PetDef* def = pet_def(pid);
+            if (def) { a = def->baseAtk; h = def->baseHp; }
         }
-    }
-    int foodStartX = sx + MAX_SHOP_PETS * (CARD_W + 4) + 8;
-    for (int i = 0; i < MAX_SHOP_FOOD; i++) {
-        bool sel = (game.cursor == MAX_SHOP_PETS + i);
-        int fx = foodStartX + i * 32;
-        int fy = sy + 16;
-        GFX_RECT(fx, fy, 28, 28, kColorBlack);
-        if (sel) GFX_RECT(fx - 1, fy - 1, 30, 30, kColorBlack);
-        if (game.shop.foods[i] != EMPTY_FOOD) {
-            // Food letter stub
-            const char* nm = FOODS[game.shop.foods[i]].name;
-            if (nm && game.fontBold) {
-                pd->graphics->setFont(game.fontBold);
-                char letter[2] = { nm[0], 0 };
-                pd->graphics->drawText(letter, 1, kASCIIEncoding, fx + 10, fy + 6);
+        int cx = sx0 + i * (CARD_W + CARD_GAP);
+        render_pet_card(pid, 1, a, h, EMPTY_FOOD, cx, sy, sel);
+
+        // Cost tag (top-center, below level dots)
+        if (pid != EMPTY_PET) {
+            if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+            pd->graphics->setDrawMode(kDrawModeFillBlack);
+            pd->graphics->drawText("3g", 2, kASCIIEncoding, cx + CARD_W - 14, sy + 2);
+        }
+
+        // Frozen indicator
+        if (game.shop.frozenPets & (1 << i)) {
+            // Black triangle in bottom-right corner
+            for (int k = 0; k < 6; k++) {
+                GFX_FILL(cx + CARD_W - 7 + k, sy + CARD_H - 8 + k, 7 - k, 1, kColorBlack);
             }
         }
     }
 
-    // Team row at y=110
-    int ty = 112;
+    // Food slots — side-by-side, right of shop
+    int fx0 = 4 + MAX_SHOP_PETS * (CARD_W + CARD_GAP) + 4;
+    int fy  = sy + (CARD_H - FOOD_H) / 2;
+    for (int i = 0; i < MAX_SHOP_FOOD; i++) {
+        bool sel = (game.cursor == MAX_SHOP_PETS + i);
+        bool frz = (game.shop.frozenFoods & (1 << i)) != 0;
+        render_food_slot(game.shop.foods[i], fx0 + i * (FOOD_W + 4), fy, sel, frz);
+    }
+
+    // Team row (below shop with small gap)
+    int ty = sy + CARD_H + 6;
     for (int i = 0; i < TEAM_SIZE; i++) {
         bool sel = (game.cursor == MAX_SHOP_PETS + MAX_SHOP_FOOD + i);
         PetSlot* p = &game.player.slots[i];
-        render_pet_card(p->id, p->level, p->atk, p->hp, p->food,
-                        sx + i * (CARD_W + 4), ty, sel);
+        // Override: if this slot is the "picked up for reorder" one, draw extra highlight
+        bool picked = (game.selectedTeamSlot == i);
+        int cx = sx0 + i * (CARD_W + CARD_GAP);
+        render_pet_card(p->id, p->level, p->atk, p->hp, p->food, cx, ty, sel);
+        if (picked) {
+            // Inverse rectangle inside to indicate "held"
+            pd->graphics->setDrawMode(kDrawModeCopy);
+            for (int b = 0; b < 3; b++) {
+                GFX_RECT(cx + b, ty + b, CARD_W - 2*b, CARD_H - 2*b, kColorBlack);
+            }
+        }
     }
 
-    // Action bar at y=200
-    int ay = 204;
+    // Action bar (y=224, h=14)
+    int ay = 222;
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
     int rollIdx = MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE;
     int endIdx  = rollIdx + 1;
+
     bool rollSel = (game.cursor == rollIdx);
     bool endSel  = (game.cursor == endIdx);
 
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    GFX_FILL(8, ay, 100, 30, rollSel ? kColorBlack : kColorWhite);
-    GFX_RECT(8, ay, 100, 30, kColorBlack);
-    if (rollSel) pd->graphics->setDrawMode(kDrawModeFillWhite);
-    pd->graphics->drawText("ROLL (1g)", 9, kASCIIEncoding, 16, ay + 8);
+    GFX_FILL(4, ay, 110, 16, rollSel ? kColorBlack : kColorWhite);
+    GFX_RECT(4, ay, 110, 16, kColorBlack);
+    pd->graphics->setDrawMode(rollSel ? kDrawModeFillWhite : kDrawModeFillBlack);
+    pd->graphics->drawText("ROLL  1g", 8, kASCIIEncoding, 22, ay + 1);
+
+    GFX_FILL(286, ay, 110, 16, endSel ? kColorBlack : kColorWhite);
+    GFX_RECT(286, ay, 110, 16, kColorBlack);
+    pd->graphics->setDrawMode(endSel ? kDrawModeFillWhite : kDrawModeFillBlack);
+    pd->graphics->drawText("END TURN", 8, kASCIIEncoding, 304, ay + 1);
+
     pd->graphics->setDrawMode(kDrawModeCopy);
 
-    GFX_FILL(290, ay, 100, 30, endSel ? kColorBlack : kColorWhite);
-    GFX_RECT(290, ay, 100, 30, kColorBlack);
-    if (endSel) pd->graphics->setDrawMode(kDrawModeFillWhite);
-    pd->graphics->drawText("END TURN", 8, kASCIIEncoding, 305, ay + 8);
+    // Hint strip showing context-sensitive A/B (above action bar)
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
+    const char* hint = "";
+    uint8_t c = game.cursor;
+    if (c < MAX_SHOP_PETS) hint = "A: buy   B: freeze";
+    else if (c < MAX_SHOP_PETS + MAX_SHOP_FOOD) hint = "A: buy food   B: freeze";
+    else if (c < MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE) hint = "A: pick up (crank to reorder)   B: sell";
+    else if (c == rollIdx) hint = "A: roll shop";
+    else hint = "A: start battle";
+    pd->graphics->drawText(hint, strlen(hint), kASCIIEncoding, 120, ay + 2);
+
     pd->graphics->setDrawMode(kDrawModeCopy);
+    render_debug_overlay();
 }
 
 // ---------------------------------------------------------------------------
-// Battle screen (stub)
+// Battle screen
+// Layout:
+//   Top bar         : y=0
+//   Player team     : right-aligned (closer to center is frontline)
+//   Enemy team      : left-aligned of enemy half (closer to center is frontline)
 // ---------------------------------------------------------------------------
 void render_battle_screen(void)
 {
     render_topbar();
 
-    // Player team on left side, enemy on right side.
     int yTeam = 70;
+
+    // Center divider
+    GFX_LINE(SCREEN_W/2, TOPBAR_H + 4, SCREEN_W/2, SCREEN_H - 24, 1, kColorBlack);
+
+    // Player team: rightmost (slot 4) sits closest to center, slot 0 farthest left
     for (int i = 0; i < TEAM_SIZE; i++) {
         PetSlot* p = &game.battle.teams[0].slots[i];
         if (p->id == EMPTY_PET) continue;
-        int x = 8 + i * (CARD_W + 4);
+        int x = SCREEN_W/2 - 8 - (TEAM_SIZE - i) * (CARD_W + CARD_GAP);
         render_pet_card(p->id, p->level, p->atk, p->hp, p->food, x, yTeam, false);
     }
+    // Enemy team: mirror — slot 0 is closest to center, slot 4 farthest right
     for (int i = 0; i < TEAM_SIZE; i++) {
         PetSlot* p = &game.battle.teams[1].slots[i];
         if (p->id == EMPTY_PET) continue;
-        // Enemy: mirror so slot 0 is rightmost (frontline), as in SAP.
-        int x = SCREEN_W - 8 - (TEAM_SIZE - i) * (CARD_W + 4);
+        int x = SCREEN_W/2 + 8 + i * (CARD_W + CARD_GAP);
         render_pet_card(p->id, p->level, p->atk, p->hp, p->food, x, yTeam, false);
     }
 
     // Center status
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
     char buf[32];
-    snprintf(buf, sizeof(buf), "%d/%d", game.battlePlayhead, game.battleLogLen);
-    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, 180, 22);
+    snprintf(buf, sizeof(buf), "%u/%u  %dx",
+             (unsigned)game.battlePlayhead,
+             (unsigned)game.battleLogLen,
+             (int)game.battleSpeed);
+    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, SCREEN_W/2 - 30, 22);
+
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    pd->graphics->drawText("crank: speed   A: skip",
+                           22, kASCIIEncoding, 4, SCREEN_H - 14);
+    render_debug_overlay();
 }

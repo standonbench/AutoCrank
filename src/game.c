@@ -6,6 +6,13 @@
 // ---------------------------------------------------------------------------
 Game game;
 uint32_t _rng_state = 1;
+bool g_debugOverlay = false;
+
+// ---------------------------------------------------------------------------
+// Forward decls (debug harness lives below init)
+// ---------------------------------------------------------------------------
+static void register_debug_menu(void);
+static void debug_force_team(int presetIdx);
 
 // ---------------------------------------------------------------------------
 // Init
@@ -28,7 +35,125 @@ void game_init(void)
     game.fontSmall = pd->graphics->loadFont("Roobert-11-Medium", &fontErr);
     if (!game.fontSmall) DLOG("font small: %s", fontErr ? fontErr : "?");
 
+    register_debug_menu();
     DLOG("AutoCrank initialized.");
+}
+
+// ---------------------------------------------------------------------------
+// Debug harness — accessible via Playdate system menu (hold MENU)
+// ---------------------------------------------------------------------------
+static const char* DBG_PRESETS[] = { "none", "Death", "Summon", "Buff", "Damage", "Copy" };
+#define DBG_PRESET_COUNT 6
+
+static void menu_toggle_debug(void* userdata) {
+    (void)userdata;
+    g_debugOverlay = !g_debugOverlay;
+    DLOG("debug overlay = %d", (int)g_debugOverlay);
+}
+
+static PDMenuItem* g_mPreset = NULL;
+static PDMenuItem* g_mCheat  = NULL;
+
+static void menu_team_preset(void* userdata) {
+    (void)userdata;
+    if (!g_mPreset) return;
+    int idx = pd->system->getMenuItemValue(g_mPreset);
+    debug_force_team(idx);
+}
+
+static void menu_cheat_battle(void* userdata) {
+    (void)userdata;
+    if (!g_mCheat) return;
+    int idx = pd->system->getMenuItemValue(g_mCheat);
+    if (!game.inRun) { pd->system->setMenuItemValue(g_mCheat, 0); return; }
+    switch (idx) {
+        case 1: // +5 gold
+            game.shop.gold += 5;
+            DLOG("cheat: +5 gold (=%d)", game.shop.gold);
+            break;
+        case 2: // skip to turn 5
+            game.turn = 5;
+            game.shop.gold = STARTING_GOLD;
+            game.shop.frozenPets = 0;
+            game.shop.frozenFoods = 0;
+            shop_refill();
+            DLOG("cheat: jumped to turn 5");
+            break;
+        case 3: // instant win current battle (if in battle/result state)
+            if (game.state == STATE_BATTLE || game.state == STATE_PRE_BATTLE ||
+                game.state == STATE_RESULT) {
+                game.battleResult = 0;
+                game.state = STATE_RESULT;
+                game.resultTimer = 61;
+            }
+            DLOG("cheat: win battle");
+            break;
+        case 4: // reset run
+            game.inRun = false;
+            game.state = STATE_TITLE;
+            save_write();
+            DLOG("cheat: reset to title");
+            break;
+    }
+    pd->system->setMenuItemValue(g_mCheat, 0);
+}
+
+static void register_debug_menu(void) {
+    pd->system->addCheckmarkMenuItem("Debug Overlay", 0, menu_toggle_debug, NULL);
+
+    static const char* presetTitles[DBG_PRESET_COUNT];
+    for (int i = 0; i < DBG_PRESET_COUNT; i++) presetTitles[i] = DBG_PRESETS[i];
+    g_mPreset = pd->system->addOptionsMenuItem(
+        "Force Team", presetTitles, DBG_PRESET_COUNT, menu_team_preset, NULL);
+
+    static const char* cheatTitles[] = { "-", "+5g", "Turn 5", "Win", "Reset" };
+    g_mCheat = pd->system->addOptionsMenuItem(
+        "Cheat", cheatTitles, 5, menu_cheat_battle, NULL);
+}
+
+// Pre-baked test teams for fast synergy iteration.
+// Each preset is up to 5 pet IDs (EMPTY_PET = empty slot).
+static const uint8_t DBG_TEAM_DEATH[5]  = {  4,  6,  9, 11,  7 }; // Cricket Sheep Ox Spider Hedgehog
+static const uint8_t DBG_TEAM_SUMMON[5] = {  1,  8,  4,  6, 11 }; // Dog Horse Cricket Sheep Spider
+static const uint8_t DBG_TEAM_BUFF[5]   = {  2,  3, 14, 16, 17 }; // Frog Bee Boar Tiger Dragon
+static const uint8_t DBG_TEAM_DAMAGE[5] = {  0,  7, 10, 12, 17 }; // Mouse Hedgehog Snake Croc Dragon
+static const uint8_t DBG_TEAM_COPY[5]   = { 15, 16,  4,  6,  9 }; // Parrot Tiger Cricket Sheep Ox
+
+static void debug_force_team(int presetIdx) {
+    if (presetIdx == 0) return;  // "none"
+    if (!game.inRun) {
+        // Auto-start a run so the preset has somewhere to go
+        game_start_run();
+    }
+    const uint8_t* src = NULL;
+    switch (presetIdx) {
+        case 1: src = DBG_TEAM_DEATH;  break;
+        case 2: src = DBG_TEAM_SUMMON; break;
+        case 3: src = DBG_TEAM_BUFF;   break;
+        case 4: src = DBG_TEAM_DAMAGE; break;
+        case 5: src = DBG_TEAM_COPY;   break;
+        default: return;
+    }
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        uint8_t pid = src[i];
+        if (pid == EMPTY_PET) {
+            game.player.slots[i].id = EMPTY_PET;
+            game.player.slots[i].level = 1;
+            game.player.slots[i].xp = 0;
+            game.player.slots[i].atk = 0;
+            game.player.slots[i].hp = 0;
+        } else {
+            const PetDef* def = pet_def(pid);
+            game.player.slots[i].id = pid;
+            game.player.slots[i].level = 1;
+            game.player.slots[i].xp = 0;
+            game.player.slots[i].atk = def->baseAtk;
+            game.player.slots[i].hp = def->baseHp;
+        }
+        game.player.slots[i].food = EMPTY_FOOD;
+        game.player.slots[i].flags = 0;
+    }
+    DLOG("forced team preset %d", presetIdx);
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +458,6 @@ int update(void* userdata)
         break;
     }
 
-    pd->system->drawFPS(0, 0);
+    if (g_debugOverlay) pd->system->drawFPS(SCREEN_W - 22, 2);
     return 1;
 }
