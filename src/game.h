@@ -126,7 +126,8 @@ typedef struct {
 // Battle state (live during simulation + playback)
 // ---------------------------------------------------------------------------
 typedef struct {
-    Team teams[2];     // [0] player, [1] enemy
+    Team teams[2];        // [0] player, [1] enemy — used by simulator AND playback (mutated)
+    Team initial[2];      // snapshot taken before sim, restored on playback
     bool inBattle;
 } BattleState;
 
@@ -279,6 +280,7 @@ void battle_begin(void);
 void battle_simulate(void);
 void battle_playback_step(void);
 void battle_log_push(BattleEventKind kind, uint8_t side, uint8_t slot, int16_t value, uint8_t data);
+void battle_emit(BattleState* bs, BattleEventKind kind, uint8_t side, uint8_t slot, int16_t value, uint8_t data);
 
 // ai.c
 void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed);

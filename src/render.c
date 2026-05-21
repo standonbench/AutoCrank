@@ -314,20 +314,43 @@ void render_battle_screen(void)
     // Center divider
     GFX_LINE(SCREEN_W/2, TOPBAR_H + 4, SCREEN_W/2, SCREEN_H - 24, 1, kColorBlack);
 
-    // Player team: rightmost (slot 4) sits closest to center, slot 0 farthest left
-    for (int i = 0; i < TEAM_SIZE; i++) {
-        PetSlot* p = &game.battle.teams[0].slots[i];
-        if (p->id == EMPTY_PET) continue;
-        int x = SCREEN_W/2 - 8 - (TEAM_SIZE - i) * (CARD_W + CARD_GAP);
-        render_pet_card(p->id, p->level, p->atk, p->hp, p->food, x, yTeam, false);
+    // Player team: rightmost alive pet sits at the frontline (closest to center).
+    // Earlier slots stack behind it to the left.
+    int pFrontSlot = -1;
+    for (int i = TEAM_SIZE - 1; i >= 0; i--) {
+        if (game.battle.teams[0].slots[i].id != EMPTY_PET) { pFrontSlot = i; break; }
     }
-    // Enemy team: mirror — slot 0 is closest to center, slot 4 farthest right
-    for (int i = 0; i < TEAM_SIZE; i++) {
-        PetSlot* p = &game.battle.teams[1].slots[i];
-        if (p->id == EMPTY_PET) continue;
-        int x = SCREEN_W/2 + 8 + i * (CARD_W + CARD_GAP);
-        render_pet_card(p->id, p->level, p->atk, p->hp, p->food, x, yTeam, false);
+    if (pFrontSlot >= 0) {
+        for (int i = 0; i <= pFrontSlot; i++) {
+            PetSlot* p = &game.battle.teams[0].slots[i];
+            if (p->id == EMPTY_PET) continue;
+            int offset = pFrontSlot - i;   // 0 = frontline, 1 = behind, ...
+            int x = SCREEN_W/2 - 8 - (1 + offset) * (CARD_W + CARD_GAP);
+            render_pet_card(p->id, p->level, p->atk, p->hp, p->food, x, yTeam, false);
+        }
     }
+
+    // Enemy team: leftmost alive pet (their slot 0) sits at the frontline.
+    int eFrontSlot = -1;
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        if (game.battle.teams[1].slots[i].id != EMPTY_PET) { eFrontSlot = i; break; }
+    }
+    // SAP rule: enemy's rightmost (highest slot) attacks first against player.
+    // Mirror: highest-slot enemy at the divider, lower slots stacked behind.
+    int eBackSlot = -1;
+    for (int i = TEAM_SIZE - 1; i >= 0; i--) {
+        if (game.battle.teams[1].slots[i].id != EMPTY_PET) { eBackSlot = i; break; }
+    }
+    if (eBackSlot >= 0) {
+        for (int i = eBackSlot; i >= 0; i--) {
+            PetSlot* p = &game.battle.teams[1].slots[i];
+            if (p->id == EMPTY_PET) continue;
+            int offset = eBackSlot - i;    // 0 = frontline (rightmost), 1 = behind
+            int x = SCREEN_W/2 + 8 + offset * (CARD_W + CARD_GAP);
+            render_pet_card(p->id, p->level, p->atk, p->hp, p->food, x, yTeam, false);
+        }
+    }
+    (void)eFrontSlot;
 
     // Center status
     if (game.fontSmall) pd->graphics->setFont(game.fontSmall);

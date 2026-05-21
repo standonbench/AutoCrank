@@ -146,25 +146,22 @@ static void deal_damage_to_slot(BattleState* bs, uint8_t side, int slot, int dmg
     if (slot < 0 || slot >= TEAM_SIZE) return;
     PetSlot* p = &bs->teams[side].slots[slot];
     if (p->id == EMPTY_PET) return;
-    // Garlic flag reduces damage taken by 2
-    if (p->flags & 0x01) dmg = (dmg > 2) ? dmg - 2 : 0;
-    p->hp -= (int16_t)dmg;
-    battle_log_push(BEV_DAMAGE, side, (uint8_t)slot, (int16_t)dmg, 0);
+    // apply_event handles garlic reduction; just emit the raw damage.
+    battle_emit(bs, BEV_DAMAGE, side, (uint8_t)slot, (int16_t)dmg, 0);
+}
+
+// Encode atk/hp pair into a single int16_t for BEV_SPAWN / BEV_BUFF
+static inline int16_t encode_pair(int atk, int hp) {
+    int a = clampi(atk, 0, 255);
+    int h = clampi(hp, 0, 255);
+    return (int16_t)((a & 0xFF) | ((h & 0xFF) << 8));
 }
 
 static void summon_pet_in_slot(BattleState* bs, uint8_t side, uint8_t slot,
                                uint8_t petId, int16_t atk, int16_t hp)
 {
     if (slot >= TEAM_SIZE) return;
-    PetSlot* p = &bs->teams[side].slots[slot];
-    p->id = petId;
-    p->level = 1;
-    p->xp = 0;
-    p->atk = atk;
-    p->hp = hp;
-    p->food = EMPTY_FOOD;
-    p->flags = 0;
-    battle_log_push(BEV_SPAWN, side, slot, 0, petId);
+    battle_emit(bs, BEV_SPAWN, side, slot, encode_pair(atk, hp), petId);
     trig_push(TRIG_FRIEND_SUMMONED, side, slot, slot, petId);
 }
 
@@ -186,34 +183,25 @@ static void pet_dog_summon(BattleState* bs, uint8_t side, uint8_t slot, TriggerE
     // Fires when any ally is summoned on our side, except us
     if (ev->side != side) return;
     if (ev->srcSlot == slot) return;
-    PetSlot* p = &bs->teams[side].slots[slot];
-    int lvl = (int)p->level;
-    p->atk = (int16_t)mini(p->atk + lvl, STAT_CAP);
-    p->hp  = (int16_t)mini(p->hp + lvl, STAT_CAP);
-    battle_log_push(BEV_BUFF, side, slot, (int16_t)(lvl + (lvl << 8)), 0);
-    battle_log_push(BEV_ABILITY, side, slot, 0, 0);
+    int lvl = (int)bs->teams[side].slots[slot].level;
+    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(lvl, lvl), 0);
 }
 
 static void pet_frog_eot(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
     (void)ev;
     if (slot == 0) return;  // no slot to the left
     int targetSlot = (int)slot - 1;
-    PetSlot* t = &bs->teams[side].slots[targetSlot];
-    if (t->id == EMPTY_PET) return;
+    if (bs->teams[side].slots[targetSlot].id == EMPTY_PET) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    t->atk = (int16_t)mini(t->atk + lvl, STAT_CAP);
-    t->hp  = (int16_t)mini(t->hp + lvl, STAT_CAP);
-    battle_log_push(BEV_BUFF, side, (uint8_t)targetSlot, (int16_t)(lvl + (lvl << 8)), 0);
+    battle_emit(bs, BEV_BUFF, side, (uint8_t)targetSlot, encode_pair(lvl, lvl), 0);
 }
 
 static void pet_bee_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
     (void)ev;
     int lvl = (int)bs->teams[side].slots[slot].level;
     for (int i = 0; i < TEAM_SIZE; i++) {
-        PetSlot* p = &bs->teams[side].slots[i];
-        if (p->id == EMPTY_PET) continue;
-        p->atk = (int16_t)mini(p->atk + lvl, STAT_CAP);
-        battle_log_push(BEV_BUFF, side, (uint8_t)i, (int16_t)(lvl), 0);
+        if (bs->teams[side].slots[i].id == EMPTY_PET) continue;
+        battle_emit(bs, BEV_BUFF, side, (uint8_t)i, encode_pair(lvl, 0), 0);
     }
 }
 
@@ -272,21 +260,18 @@ static void pet_horse_summon(BattleState* bs, uint8_t side, uint8_t slot, Trigge
     // Buff the friend that was just summoned (in ev->dataSlot), unless it's us.
     if (ev->side != side) return;
     if (ev->srcSlot == slot) return;
-    PetSlot* t = &bs->teams[side].slots[ev->dataSlot];
-    if (t->id == EMPTY_PET) return;
+    if (ev->dataSlot >= TEAM_SIZE) return;
+    if (bs->teams[side].slots[ev->dataSlot].id == EMPTY_PET) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    t->atk = (int16_t)mini(t->atk + lvl, STAT_CAP);
-    battle_log_push(BEV_BUFF, side, ev->dataSlot, (int16_t)lvl, 0);
+    battle_emit(bs, BEV_BUFF, side, ev->dataSlot, encode_pair(lvl, 0), 0);
 }
 
 static void pet_ox_friendfaint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
     // Fires when an ally OTHER THAN US faints
     if (ev->side != side) return;
     if (ev->srcSlot == slot) return;
-    PetSlot* p = &bs->teams[side].slots[slot];
-    int lvl = (int)p->level;
-    p->atk = (int16_t)mini(p->atk + lvl, STAT_CAP);
-    battle_log_push(BEV_BUFF, side, slot, (int16_t)lvl, 0);
+    int lvl = (int)bs->teams[side].slots[slot].level;
+    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(lvl, 0), 0);
 }
 
 static void pet_snake_friendatk(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
@@ -327,11 +312,8 @@ static void pet_croc_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEve
 static void pet_boar_beforeatk(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
     // Fires only when WE are the one attacking
     if (ev->side != side || ev->srcSlot != slot) return;
-    PetSlot* p = &bs->teams[side].slots[slot];
-    int lvl = (int)p->level;
-    p->atk = (int16_t)mini(p->atk + 2 * lvl, STAT_CAP);
-    p->hp  = (int16_t)mini(p->hp + 2 * lvl, STAT_CAP);
-    battle_log_push(BEV_BUFF, side, slot, (int16_t)((2*lvl) + ((2*lvl) << 8)), 0);
+    int lvl = (int)bs->teams[side].slots[slot].level;
+    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(2 * lvl, 2 * lvl), 0);
 }
 
 static void pet_dragon_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
@@ -341,10 +323,8 @@ static void pet_dragon_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerE
     int boughtTier = (int)ev->data;
     if (boughtTier != 1) return;
     for (int i = 0; i < TEAM_SIZE; i++) {
-        PetSlot* p = &bs->teams[side].slots[i];
-        if (p->id == EMPTY_PET) continue;
-        p->atk = (int16_t)mini(p->atk + 1, STAT_CAP);
-        p->hp  = (int16_t)mini(p->hp + 1, STAT_CAP);
+        if (bs->teams[side].slots[i].id == EMPTY_PET) continue;
+        battle_emit(bs, BEV_BUFF, side, (uint8_t)i, encode_pair(1, 1), 0);
     }
 }
 
