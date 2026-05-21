@@ -299,71 +299,142 @@ void render_shop_screen(void)
 }
 
 // ---------------------------------------------------------------------------
-// Battle screen
-// Layout:
-//   Top bar         : y=0
-//   Player team     : right-aligned (closer to center is frontline)
-//   Enemy team      : left-aligned of enemy half (closer to center is frontline)
+// Battle screen — per-event animation: lunge, hit-shake, faint-flash,
+// floating damage/buff numbers.
 // ---------------------------------------------------------------------------
+#define BATTLE_Y 74
+
+// Current animating event + its 0..1 progress. NULL if playback finished.
+static BattleEvent* battle_cur_event(float* tOut) {
+    if (game.battlePlayhead >= game.battleLogLen) { *tOut = 0; return NULL; }
+    BattleEvent* e = &game.battleLog[game.battlePlayhead];
+    float dur = (float)battle_event_duration(e->kind);
+    float t = dur > 0 ? game.battleClock / dur : 1.0f;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    *tOut = t;
+    return e;
+}
+
+// Visual offset + flash for the pet at (side, slot) given current event.
+static void battle_pet_anim(BattleEvent* e, float t, uint8_t side, uint8_t slot,
+                            int* dx, int* dy, bool* flash) {
+    *dx = 0; *dy = 0; *flash = false;
+    if (!e || e->side != side || e->slot != slot) return;
+    switch (e->kind) {
+        case BEV_ATTACK: {
+            // Lunge toward the divider and back (sine arc).
+            int dir = (side == 0) ? 1 : -1;
+            *dx = (int)(sinf(t * PI_F) * 22.0f) * dir;
+            break;
+        }
+        case BEV_DAMAGE:
+            // Quick horizontal shake.
+            *dx = (int)(sinf(t * 38.0f) * 3.5f);
+            *flash = ((int)(t * 6.0f) & 1) == 0;
+            break;
+        case BEV_FAINT:
+            // Strobe flash while fainting.
+            *flash = ((int)(t * 9.0f) & 1) == 0;
+            *dy = (int)(t * 6.0f);
+            break;
+        case BEV_BUFF:
+        case BEV_ABILITY:
+            *dy = -(int)(sinf(t * PI_F) * 4.0f);
+            break;
+        default: break;
+    }
+}
+
+// Floating combat text above a pet card for the current event.
+static void battle_float_text(BattleEvent* e, float t, uint8_t side, uint8_t slot,
+                              int cardX) {
+    if (!e || e->side != side || e->slot != slot) return;
+    char buf[16];
+    buf[0] = 0;
+    if (e->kind == BEV_DAMAGE) {
+        snprintf(buf, sizeof(buf), "-%d", e->value);
+    } else if (e->kind == BEV_BUFF) {
+        int da = e->value & 0xFF, dh = (e->value >> 8) & 0xFF;
+        if (da && dh) snprintf(buf, sizeof(buf), "+%d/+%d", da, dh);
+        else if (da) snprintf(buf, sizeof(buf), "+%d atk", da);
+        else if (dh) snprintf(buf, sizeof(buf), "+%d hp", dh);
+    }
+    if (!buf[0]) return;
+    int ty = BATTLE_Y - 4 - (int)(t * 16.0f);
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    // White halo then black text for legibility
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    for (int ox = -1; ox <= 1; ox++)
+        for (int oy = -1; oy <= 1; oy++)
+            pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding,
+                                   cardX + 8 + ox, ty + oy);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
+    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, cardX + 8, ty);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+}
+
+static void battle_draw_pet(BattleEvent* e, float t, uint8_t side, uint8_t slot,
+                            int baseX) {
+    PetSlot* p = &game.battle.teams[side].slots[slot];
+    int dx, dy; bool flash;
+    battle_pet_anim(e, t, side, slot, &dx, &dy, &flash);
+    int x = baseX + dx, y = BATTLE_Y + dy;
+    render_pet_card(p->id, p->level, p->atk, p->hp, p->food, x, y, false);
+    if (flash) {
+        pd->graphics->setDrawMode(kDrawModeInverted);
+        GFX_FILL(x, y, CARD_W, CARD_H, kColorBlack);
+        pd->graphics->setDrawMode(kDrawModeCopy);
+    }
+    battle_float_text(e, t, side, slot, baseX);
+}
+
 void render_battle_screen(void)
 {
     render_topbar();
 
-    int yTeam = 70;
+    GFX_LINE(SCREEN_W/2, TOPBAR_H + 2, SCREEN_W/2, SCREEN_H - 18, 1, kColorBlack);
 
-    // Center divider
-    GFX_LINE(SCREEN_W/2, TOPBAR_H + 4, SCREEN_W/2, SCREEN_H - 24, 1, kColorBlack);
+    float t = 0.0f;
+    BattleEvent* e = battle_cur_event(&t);
 
-    // Player team: rightmost alive pet sits at the frontline (closest to center).
-    // Earlier slots stack behind it to the left.
-    int pFrontSlot = -1;
-    for (int i = TEAM_SIZE - 1; i >= 0; i--) {
-        if (game.battle.teams[0].slots[i].id != EMPTY_PET) { pFrontSlot = i; break; }
-    }
-    if (pFrontSlot >= 0) {
-        for (int i = 0; i <= pFrontSlot; i++) {
-            PetSlot* p = &game.battle.teams[0].slots[i];
-            if (p->id == EMPTY_PET) continue;
-            int offset = pFrontSlot - i;   // 0 = frontline, 1 = behind, ...
-            int x = SCREEN_W/2 - 8 - (1 + offset) * (CARD_W + CARD_GAP);
-            render_pet_card(p->id, p->level, p->atk, p->hp, p->food, x, yTeam, false);
-        }
+    // Player team: rightmost alive pet at the frontline (nearest divider).
+    int pFront = -1;
+    for (int i = TEAM_SIZE - 1; i >= 0; i--)
+        if (game.battle.teams[0].slots[i].id != EMPTY_PET) { pFront = i; break; }
+    for (int i = 0; i <= pFront; i++) {
+        if (game.battle.teams[0].slots[i].id == EMPTY_PET) continue;
+        int offset = pFront - i;
+        int baseX = SCREEN_W/2 - 8 - (1 + offset) * (CARD_W + CARD_GAP);
+        battle_draw_pet(e, t, 0, (uint8_t)i, baseX);
     }
 
-    // Enemy team: leftmost alive pet (their slot 0) sits at the frontline.
-    int eFrontSlot = -1;
-    for (int i = 0; i < TEAM_SIZE; i++) {
-        if (game.battle.teams[1].slots[i].id != EMPTY_PET) { eFrontSlot = i; break; }
+    // Enemy team: highest-slot alive pet at the frontline (nearest divider).
+    int eBack = -1;
+    for (int i = TEAM_SIZE - 1; i >= 0; i--)
+        if (game.battle.teams[1].slots[i].id != EMPTY_PET) { eBack = i; break; }
+    for (int i = eBack; i >= 0; i--) {
+        if (game.battle.teams[1].slots[i].id == EMPTY_PET) continue;
+        int offset = eBack - i;
+        int baseX = SCREEN_W/2 + 8 + offset * (CARD_W + CARD_GAP);
+        battle_draw_pet(e, t, 1, (uint8_t)i, baseX);
     }
-    // SAP rule: enemy's rightmost (highest slot) attacks first against player.
-    // Mirror: highest-slot enemy at the divider, lower slots stacked behind.
-    int eBackSlot = -1;
-    for (int i = TEAM_SIZE - 1; i >= 0; i--) {
-        if (game.battle.teams[1].slots[i].id != EMPTY_PET) { eBackSlot = i; break; }
-    }
-    if (eBackSlot >= 0) {
-        for (int i = eBackSlot; i >= 0; i--) {
-            PetSlot* p = &game.battle.teams[1].slots[i];
-            if (p->id == EMPTY_PET) continue;
-            int offset = eBackSlot - i;    // 0 = frontline (rightmost), 1 = behind
-            int x = SCREEN_W/2 + 8 + offset * (CARD_W + CARD_GAP);
-            render_pet_card(p->id, p->level, p->atk, p->hp, p->food, x, yTeam, false);
-        }
-    }
-    (void)eFrontSlot;
 
-    // Center status
+    // Header labels
     if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
     pd->graphics->setDrawMode(kDrawModeFillBlack);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%u/%u  %dx",
-             (unsigned)game.battlePlayhead,
-             (unsigned)game.battleLogLen,
-             (int)game.battleSpeed);
-    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, SCREEN_W/2 - 30, 22);
+    pd->graphics->drawText("YOU", 3, kASCIIEncoding, 8, 22);
+    pd->graphics->drawText("FOE", 3, kASCIIEncoding, SCREEN_W - 30, 22);
 
-    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-    pd->graphics->drawText("crank: speed   A: skip",
-                           22, kASCIIEncoding, 4, SCREEN_H - 14);
+    // Speed indicator (only show when cranked above 1x)
+    if (game.battleSpeed > 1) {
+        char sb[12];
+        snprintf(sb, sizeof(sb), "%dx", (int)game.battleSpeed);
+        pd->graphics->drawText(sb, strlen(sb), kASCIIEncoding, SCREEN_W/2 - 8, 22);
+    }
+
+    pd->graphics->drawText("crank: faster   A: skip",
+                           23, kASCIIEncoding, 8, SCREEN_H - 14);
+    pd->graphics->setDrawMode(kDrawModeCopy);
     render_debug_overlay();
 }

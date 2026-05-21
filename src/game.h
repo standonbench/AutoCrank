@@ -281,6 +281,7 @@ void battle_simulate(void);
 void battle_playback_step(void);
 void battle_log_push(BattleEventKind kind, uint8_t side, uint8_t slot, int16_t value, uint8_t data);
 void battle_emit(BattleState* bs, BattleEventKind kind, uint8_t side, uint8_t slot, int16_t value, uint8_t data);
+int  battle_event_duration(uint8_t kind);
 
 // ai.c
 void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed);

@@ -219,7 +219,24 @@ void battle_simulate(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Playback — chew through events at a rate set by crank.
+// Per-event animation window (in frames at 1x speed)
+// ---------------------------------------------------------------------------
+int battle_event_duration(uint8_t kind) {
+    switch (kind) {
+        case BEV_ATTACK:  return 10;
+        case BEV_DAMAGE:  return 7;
+        case BEV_FAINT:   return 11;
+        case BEV_BUFF:    return 8;
+        case BEV_SPAWN:   return 9;
+        case BEV_ABILITY: return 7;
+        case BEV_RESULT:  return 2;
+    }
+    return 6;
+}
+
+// ---------------------------------------------------------------------------
+// Playback — animate one event at a time; crank scales speed.
+// Each event animates over its window, then is applied at the window's end.
 // ---------------------------------------------------------------------------
 void battle_playback_step(void) {
     BattleState* bs = &game.battle;
@@ -230,7 +247,7 @@ void battle_playback_step(void) {
         bs->teams[1] = bs->initial[1];
     }
 
-    // Crank-driven speed: 1x by default, scales with rotation rate.
+    // Crank-driven speed: 1x baseline, scales with rotation rate.
     float crankChange = pd->system->getCrankChange();
     if (crankChange < 0) crankChange = -crankChange;
     int speed = 1 + (int)(crankChange / 5.0f);
@@ -244,17 +261,23 @@ void battle_playback_step(void) {
         while (game.battlePlayhead < game.battleLogLen) {
             apply_event(bs, &game.battleLog[game.battlePlayhead++]);
         }
+        game.state = STATE_RESULT;
+        game.resultTimer = 0;
+        return;
     }
 
-    const float baseEventDur = 8.0f;
     game.battleClock += (float)speed;
 
-    while (game.battleClock >= baseEventDur && game.battlePlayhead < game.battleLogLen) {
-        game.battleClock -= baseEventDur;
-        BattleEvent* e = &game.battleLog[game.battlePlayhead++];
+    // Advance through events whose animation window has fully elapsed.
+    while (game.battlePlayhead < game.battleLogLen) {
+        BattleEvent* e = &game.battleLog[game.battlePlayhead];
+        float dur = (float)battle_event_duration(e->kind);
+        if (game.battleClock < dur) break;
+        game.battleClock -= dur;
         apply_event(bs, e);
         if (e->kind == BEV_ATTACK)  sfx_attack();
         if (e->kind == BEV_FAINT)   sfx_faint();
+        game.battlePlayhead++;
     }
 
     if (game.battlePlayhead >= game.battleLogLen) {

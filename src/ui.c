@@ -98,10 +98,20 @@ void ui_pre_battle_update(void) {
 
 void ui_pre_battle_render(void) {
     render_battle_screen();
-    if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
+    // "Round N" banner — a centered black bar so it never overlaps pets.
     char buf[32];
-    snprintf(buf, sizeof(buf), "Round %d", game.turn);
-    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, 150, 100);
+    snprintf(buf, sizeof(buf), "ROUND %d", game.turn);
+    int bw = 160, bh = 32;
+    int bx = (SCREEN_W - bw) / 2, by = SCREEN_H / 2 - bh / 2;
+    GFX_FILL(bx, by, bw, bh, kColorBlack);
+    GFX_RECT(bx - 2, by - 2, bw + 4, bh + 4, kColorBlack);
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
+    int tw = pd->graphics->getTextWidth(game.fontLarge, buf, strlen(buf),
+                                        kASCIIEncoding, 0);
+    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding,
+                           bx + (bw - tw) / 2, by + 6);
+    pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
 // ---------------------------------------------------------------------------
