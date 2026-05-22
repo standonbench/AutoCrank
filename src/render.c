@@ -54,23 +54,22 @@ void render_pet_card(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
     GFX_FILL(x, y, CARD_W, CARD_H, kColorWhite);
     GFX_RECT(x, y, CARD_W, CARD_H, kColorBlack);
 
-    // Sprite / fallback letter area (centered, 32x32 at top)
+    // Sprite portrait — a black box framing the white 1-bit creature.
     int sx = x + (CARD_W - SPRITE_SIZE) / 2;
     int sy = y + 6;
+    GFX_FILL(sx, sy, SPRITE_SIZE, SPRITE_SIZE, kColorBlack);
     LCDBitmap* bmp = image_pet(petId);
     if (bmp) {
+        // Kenney sprites are 16x16 white-on-transparent; 2x → 32x32 white-on-black.
         pd->graphics->drawScaledBitmap(bmp, sx, sy, 2.0f, 2.0f);
     } else {
-        // Stub: bordered square with a large centered letter
-        GFX_FILL(sx, sy, SPRITE_SIZE, SPRITE_SIZE, kColorWhite);
-        GFX_RECT(sx, sy, SPRITE_SIZE, SPRITE_SIZE, kColorBlack);
+        // Fallback: large white letter on the black box
         const char* nm = pet_name(petId);
         if (nm && nm[0]) {
             char letter[2] = { nm[0], 0 };
             LCDFont* f = game.fontLarge ? game.fontLarge : game.fontBold;
             if (f) pd->graphics->setFont(f);
-            pd->graphics->setDrawMode(kDrawModeFillBlack);
-            // approximate centering (we don't have getTextWidth handy here)
+            pd->graphics->setDrawMode(kDrawModeFillWhite);
             pd->graphics->drawText(letter, 1, kASCIIEncoding, sx + 10, sy + 7);
             pd->graphics->setDrawMode(kDrawModeCopy);
         }
