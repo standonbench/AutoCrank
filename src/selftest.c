@@ -262,6 +262,46 @@ void selftest_run(void) {
         check("Empty vs empty -> draw", run_battle(NULL, 0, NULL, 0) == 2);
     }
 
+    // T22: Apple food gives the target +1/+1.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mk(0, 1, 2);
+        if (FOODS[0].apply) FOODS[0].apply(&game.player, 0);
+        check("Apple food +1/+1",
+              game.player.slots[0].atk == 2 && game.player.slots[0].hp == 3);
+    }
+
+    // T23: Milk food gives an ally +2/+2 (single ally = deterministic target).
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mk(0, 1, 2);
+        if (FOODS[5].apply) FOODS[5].apply(&game.player, 0);
+        check("Milk food +2/+2",
+              game.player.slots[0].atk == 3 && game.player.slots[0].hp == 4);
+    }
+
+    // T24: Winning the 10th battle reaches the victory state.
+    {
+        clear_team(&game.player);
+        game.inRun = true;
+        game.wins = WINS_TO_VICTORY - 1;
+        game.lives = 5;
+        game.battleResult = 0;
+        game_after_battle();
+        check("10th win -> victory", game.state == STATE_VICTORY);
+    }
+
+    // T25: Losing the last life reaches the game-over state.
+    {
+        clear_team(&game.player);
+        game.inRun = true;
+        game.wins = 3;
+        game.lives = 1;
+        game.battleResult = 1;
+        game_after_battle();
+        check("Last life lost -> game over", game.state == STATE_GAMEOVER);
+    }
+
     DLOG("SELFTEST: %d passed, %d failed", g_pass, g_fail);
 }
 
