@@ -245,13 +245,13 @@ LCDBitmap* image_pet(uint8_t id);
 LCDBitmap* image_food(uint8_t id);
 
 // render.c
-void render_pet_card(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
-                     uint8_t heldFood, int x, int y, bool selected);
-void render_empty_slot(int x, int y, bool selected);
 void render_topbar(void);
-void render_mountains(int baseY);
+void render_alpine_bg(int horizonY);
 void render_shop_screen(void);
 void render_battle_screen(void);
+void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
+                 uint8_t heldFood, int cx, int baseY, float spriteScale,
+                 bool selected, bool picked);
 
 // shop.c
 void shop_init_run(void);
@@ -315,7 +315,7 @@ void ui_gallery_render(void);
 // creatures.c
 void draw_creature(uint8_t petId, int bx, int by);
 void draw_cow(int bx, int by, int variant);
-void draw_creature_scaled(uint8_t petId, int x, int y, int scale);
+void draw_creature_scaled(uint8_t petId, int x, int y, float scale);
 
 // sound.c
 void sound_init(void);

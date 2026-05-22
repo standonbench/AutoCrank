@@ -65,7 +65,7 @@ void ui_title_render(void) {
     pd->graphics->setDrawMode(kDrawModeCopy);
 
     // Mountain ridgeline behind the title
-    render_mountains(74);
+    render_alpine_bg(120);
 
     // Title — sits in a white plaque so it stays legible over the peaks
     {

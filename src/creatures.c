@@ -268,13 +268,16 @@ void draw_creature(uint8_t petId, int bx, int by)
     }
 }
 
-// Render a creature into an offscreen 32x32 bitmap and blit it scaled.
-void draw_creature_scaled(uint8_t petId, int x, int y, int scale)
+// Render a creature into an offscreen 32x32 bitmap and blit it scaled,
+// treating white as transparent so it drops cleanly onto any background.
+void draw_creature_scaled(uint8_t petId, int x, int y, float scale)
 {
     LCDBitmap* bmp = pd->graphics->newBitmap(32, 32, kColorWhite);
     pd->graphics->pushContext(bmp);
     draw_creature(petId, 0, 0);
     pd->graphics->popContext();
-    pd->graphics->drawScaledBitmap(bmp, x, y, (float)scale, (float)scale);
+    pd->graphics->setDrawMode(kDrawModeWhiteTransparent);
+    pd->graphics->drawScaledBitmap(bmp, x, y, scale, scale);
+    pd->graphics->setDrawMode(kDrawModeCopy);
     pd->graphics->freeBitmap(bmp);
 }
