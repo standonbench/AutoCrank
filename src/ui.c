@@ -31,15 +31,16 @@ void ui_title_render(void) {
     }
     if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
     pd->graphics->drawText("B: self-test", 12, kASCIIEncoding, 158, 182);
-
-    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Runs: %lu  Wins: %lu  Best streak: %lu",
-             (unsigned long)game.totalRuns,
-             (unsigned long)game.totalWins,
-             (unsigned long)game.bestStreak);
-    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, 70, 210);
     pd->graphics->setDrawMode(kDrawModeCopy);
+
+    // TEMP: large procedural-creature preview strip for art iteration.
+    for (int v = 0; v < 3; v++) {
+        int px = 40 + v * 110;
+        int py = 120;
+        GFX_FILL(px - 3, py - 3, 96 + 6, 96 + 6, kColorWhite);
+        GFX_RECT(px - 3, py - 3, 96 + 6, 96 + 6, kColorBlack);
+        draw_creature_scaled((uint8_t)v, px, py, 3);
+    }
 }
 
 // ---------------------------------------------------------------------------

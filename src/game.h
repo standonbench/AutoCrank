@@ -307,6 +307,11 @@ void save_write(void);
 void selftest_run(void);
 void selftest_render(void);
 
+// creatures.c
+void draw_creature(uint8_t petId, int bx, int by);
+void draw_cow(int bx, int by, int variant);
+void draw_creature_scaled(uint8_t petId, int x, int y, int scale);
+
 // sound.c
 void sound_init(void);
 void sfx_buy(void);
