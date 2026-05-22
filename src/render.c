@@ -403,7 +403,13 @@ static void battle_draw_pet(BattleEvent* e, float t, uint8_t side, uint8_t slot,
 
 void render_battle_screen(void)
 {
-    render_topbar();
+    // Alpine arena: a mountain ridgeline rises behind the two herds.
+    render_mountains(BATTLE_Y - 2);
+    render_topbar();   // black bar drawn over the mountain bases
+
+    // Pasture ground line the herds stand on
+    for (int x = 4; x < SCREEN_W - 4; x += 6)
+        GFX_FILL(x, BATTLE_Y + CARD_H - 2, 3, 2, kColorBlack);
 
     GFX_LINE(SCREEN_W/2, TOPBAR_H + 2, SCREEN_W/2, SCREEN_H - 18, 1, kColorBlack);
 
