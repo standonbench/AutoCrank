@@ -226,6 +226,7 @@ typedef struct {
     uint32_t frameCount;
     uint16_t titleBlinkTimer;
     uint16_t preBattleTimer;
+    uint8_t  titleCursor;        // title-screen signpost selection (0..2)
 } Game;
 
 extern Game game;

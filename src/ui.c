@@ -8,15 +8,19 @@ void ui_title_update(void) {
     PDButtons cur, prs, rel;
     pd->system->getButtonState(&cur, &prs, &rel);
     game.titleBlinkTimer++;
+    if (prs & kButtonUp)
+        game.titleCursor = (uint8_t)((game.titleCursor + 2) % 3);
+    if (prs & kButtonDown)
+        game.titleCursor = (uint8_t)((game.titleCursor + 1) % 3);
     if (prs & kButtonA) {
-        game_start_run();
-    }
-    if (prs & kButtonB) {
-        selftest_run();
-        game.state = STATE_SELFTEST;
-    }
-    if (prs & kButtonUp) {
-        game.state = STATE_GALLERY;
+        if (game.titleCursor == 0) {
+            game_start_run();
+        } else if (game.titleCursor == 1) {
+            game.state = STATE_GALLERY;
+        } else {
+            selftest_run();
+            game.state = STATE_SELFTEST;
+        }
     }
 }
 
@@ -59,13 +63,6 @@ static void title_text_centered(const char* s, LCDFont* font, int y) {
     pd->graphics->drawText(s, strlen(s), kASCIIEncoding, (SCREEN_W - w) / 2, y);
 }
 
-// A white plaque with a double black border — the game's panel style.
-static void ui_plaque(int x, int y, int w, int h) {
-    GFX_FILL(x, y, w, h, kColorWhite);
-    GFX_RECT(x, y, w, h, kColorBlack);
-    GFX_RECT(x + 3, y + 3, w - 6, h - 6, kColorBlack);
-}
-
 // A small five-petal edelweiss, white petals with a black centre.
 static void draw_flower(int cx, int cy, int r) {
     for (int i = 0; i < 5; i++) {
@@ -78,43 +75,214 @@ static void draw_flower(int cx, int cy, int r) {
     GFX_ELLIPSE(cx - 2, cy - 2, 5, 5, kColorBlack);
 }
 
-void ui_title_render(void) {
-    // Light & cozy Alpine pasture.
-    GFX_FILL(0, 0, SCREEN_W, SCREEN_H, kColorWhite);
+// 50% checker — a soft drop-shadow tone.
+static LCDPattern UI_SHADE = {
+    0xAA,0x55,0xAA,0x55,0xAA,0x55,0xAA,0x55,
+    0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF
+};
+
+// Centred text with a white halo — stays legible over the mountains.
+static void draw_text_halo_centered(const char* s, LCDFont* font, int y) {
+    if (font) pd->graphics->setFont(font);
+    int w = pd->graphics->getTextWidth(font, s, strlen(s), kASCIIEncoding, 0);
+    int x = (SCREEN_W - w) / 2;
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    for (int ox = -1; ox <= 1; ox++)
+        for (int oy = -1; oy <= 1; oy++)
+            pd->graphics->drawText(s, strlen(s), kASCIIEncoding, x + ox, y + oy);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
+    pd->graphics->drawText(s, strlen(s), kASCIIEncoding, x, y);
     pd->graphics->setDrawMode(kDrawModeCopy);
+}
 
-    // Mountain ridgeline behind the title
-    render_alpine_bg(120);
+// A triangular pennant on a thin pole, rising above the title banner.
+static void draw_pennant(int x, int topY, int poleH, bool right) {
+    GFX_LINE(x, topY, x, topY + poleH, 2, kColorBlack);
+    int d = right ? 1 : -1;
+    pd->graphics->fillTriangle(x, topY, x + d * 13, topY + 4,
+                               x, topY + 10, kColorBlack);
+}
 
-    // Title — sits in a white plaque so it stays legible over the peaks
-    {
-        int pw = 200, ph = 30, px = (SCREEN_W - pw) / 2, py = 36;
-        GFX_FILL(px, py, pw, ph, kColorWhite);
-        GFX_RECT(px, py, pw, ph, kColorBlack);
-        GFX_RECT(px + 2, py + 2, pw - 4, ph - 4, kColorBlack);
+// A black pine with a white halo so it reads over both pasture and forest.
+static void draw_pine(int cx, int baseY, int h) {
+    int w = (h * 9) / 20;
+    int by[3], ay[3], tw[3];
+    for (int t = 0; t < 3; t++) {
+        tw[t] = (int)(w * (1.0f - 0.30f * t));
+        by[t] = baseY - 5 - (int)(h * 0.34f * t);
+        ay[t] = by[t] - (int)(h * 0.52f);
     }
-    title_text_centered("AutoCrank", game.fontLarge, 42);
-    title_text_centered("- combat des reines -", game.fontSmall, 80);
+    for (int t = 0; t < 3; t++)
+        pd->graphics->fillTriangle(cx - tw[t] - 3, by[t] + 3, cx, ay[t] - 4,
+                                   cx + tw[t] + 3, by[t] + 3, kColorWhite);
+    for (int t = 0; t < 3; t++)
+        pd->graphics->fillTriangle(cx - tw[t], by[t], cx, ay[t],
+                                   cx + tw[t], by[t], kColorBlack);
+    GFX_FILL(cx - 2, baseY - 7, 5, 9, kColorWhite);
+    GFX_RECT(cx - 2, baseY - 7, 5, 9, kColorBlack);
+}
 
-    // Hero cow grazing on the pasture
-    int cowScale = 2, cowW = 32 * cowScale;
-    draw_creature_scaled(16, (SCREEN_W - cowW) / 2, 104, cowScale);
+// A little Alpine chalet — white walls, a snow-capped roof, door & windows.
+static void draw_chalet(int x, int baseY) {
+    int bw = 48, bh = 30, bx = x, by = baseY - bh;
+    GFX_FILL(bx, by, bw, bh, kColorWhite);
+    GFX_RECT(bx, by, bw, bh, kColorBlack);
+    GFX_RECT(bx + 1, by + 1, bw - 2, bh - 2, kColorBlack);
+    // roof — wide overhanging triangle
+    int apexY = by - 20, rcx = bx + bw / 2;
+    pd->graphics->fillTriangle(bx - 9, by + 2, rcx, apexY,
+                               bx + bw + 9, by + 2, kColorBlack);
+    GFX_LINE(bx - 9, by + 2, bx + bw + 9, by + 2, 3, kColorBlack);
+    // ridge snowcap
+    pd->graphics->fillTriangle(rcx, apexY, rcx - 8, apexY + 11,
+                               rcx + 8, apexY + 11, kColorWhite);
+    GFX_LINE(rcx, apexY, rcx - 8, apexY + 11, 1, kColorBlack);
+    GFX_LINE(rcx, apexY, rcx + 8, apexY + 11, 1, kColorBlack);
+    // door
+    int dw = 12, dh = 14, dx = bx + bw / 2 - dw / 2;
+    GFX_FILL(dx, baseY - dh, dw, dh, kColorBlack);
+    GFX_ELLIPSE(dx + dw - 4, baseY - dh / 2 - 1, 3, 3, kColorWhite);
+    // two windows with cross mullions
+    for (int i = 0; i < 2; i++) {
+        int wx = bx + 6 + i * (bw - 24), wy = by + 6;
+        GFX_FILL(wx, wy, 11, 11, kColorWhite);
+        GFX_RECT(wx, wy, 11, 11, kColorBlack);
+        GFX_LINE(wx + 5, wy, wx + 5, wy + 10, 1, kColorBlack);
+        GFX_LINE(wx, wy + 5, wx + 10, wy + 5, 1, kColorBlack);
+    }
+}
 
-    // Pasture line (dashed)
-    for (int x = 20; x < SCREEN_W - 20; x += 6)
-        GFX_FILL(x, 170, 3, 2, kColorBlack);
+// A distant gull — a simple double-arc silhouette.
+static void draw_bird(int cx, int cy) {
+    GFX_LINE(cx - 7, cy,     cx - 3, cy - 5, 2, kColorBlack);
+    GFX_LINE(cx - 3, cy - 5, cx,     cy - 1, 2, kColorBlack);
+    GFX_LINE(cx,     cy - 1, cx + 3, cy - 5, 2, kColorBlack);
+    GFX_LINE(cx + 3, cy - 5, cx + 7, cy,     2, kColorBlack);
+}
 
-    // Prompts
-    if ((game.titleBlinkTimer / 15) & 1)
-        title_text_centered("PRESS A TO PLAY", game.fontBold, 182);
-    title_text_centered("B: self-test    Up: roster", game.fontSmall, 204);
+// A spotted toadstool nestled in the grass.
+static void draw_mushroom(int cx, int baseY) {
+    GFX_FILL(cx - 3, baseY - 9, 7, 9, kColorWhite);
+    GFX_RECT(cx - 3, baseY - 9, 7, 9, kColorBlack);
+    GFX_ELLIPSE(cx - 9, baseY - 16, 19, 13, kColorBlack);
+    GFX_ELLIPSE(cx - 5, baseY - 13, 4, 4, kColorWhite);
+    GFX_ELLIPSE(cx + 2, baseY - 14, 3, 3, kColorWhite);
+}
 
+// One signpost plank — a left-pointing wooden arrow sign.
+static void draw_sign_plank(int cy, const char* label, bool selected) {
+    int bodyL = 214, bodyR = 320, top = cy - 15, bot = cy + 15;
+    int tipX = bodyL - 15;
+    LCDColor fill = selected ? kColorBlack : kColorWhite;
+    // drop shadow
+    pd->graphics->fillTriangle(tipX + 3, cy + 4, bodyL + 3, top + 4,
+                               bodyL + 3, bot + 4, (LCDColor)UI_SHADE);
+    GFX_FILL(bodyL + 3, top + 4, bodyR - bodyL, bot - top, (LCDColor)UI_SHADE);
+    // body
+    pd->graphics->fillTriangle(tipX, cy, bodyL, top, bodyL, bot, fill);
+    GFX_FILL(bodyL, top, bodyR - bodyL, bot - top, fill);
+    // outline — top / right / bottom / two point edges
+    GFX_LINE(bodyL, top, bodyR, top, 2, kColorBlack);
+    GFX_LINE(bodyL, bot, bodyR, bot, 2, kColorBlack);
+    GFX_LINE(bodyR, top, bodyR, bot, 2, kColorBlack);
+    GFX_LINE(bodyL, top, tipX, cy, 2, kColorBlack);
+    GFX_LINE(bodyL, bot, tipX, cy, 2, kColorBlack);
+    // woodgrain + nail heads on the light planks
+    if (!selected) {
+        GFX_LINE(bodyL + 8, top + 8, bodyR - 8, top + 8, 1, kColorBlack);
+        GFX_LINE(bodyL + 8, bot - 8, bodyR - 8, bot - 8, 1, kColorBlack);
+        pd->graphics->drawEllipse(bodyR - 14, top + 6, 5, 5, 1, 0, 360,
+                                  kColorBlack);
+        pd->graphics->drawEllipse(bodyR - 14, bot - 11, 5, 5, 1, 0, 360,
+                                  kColorBlack);
+    }
+    // label
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    int tw = pd->graphics->getTextWidth(game.fontBold, label, strlen(label),
+                                        kASCIIEncoding, 0);
+    int tx = (bodyL + bodyR) / 2 - tw / 2 - 3;
+    pd->graphics->setDrawMode(selected ? kDrawModeFillWhite : kDrawModeFillBlack);
+    pd->graphics->drawText(label, strlen(label), kASCIIEncoding, tx, cy - 9);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+}
+
+void ui_title_render(void) {
+    // Alpine pasture backdrop.
+    render_alpine_bg(150);
+
+    // --- gulls drifting over the ridge ---
+    draw_bird(46, 72);
+    draw_bird(150, 60);
+    draw_bird(96, 88);
+
+    // --- scene: pines behind a chalet, hero cow on the pasture ---
+    draw_pine(22, 170, 26);
+    draw_pine(70, 190, 44);
+    draw_chalet(36, 182);
+    draw_creature_scaled(16, 92, 142, 2.0f);
+
+    // --- foreground flora ---
+    draw_flower(52, 210, 5);
+    draw_flower(178, 206, 4);
+    draw_flower(248, 198, 5);
+    draw_flower(292, 212, 4);
+    draw_mushroom(212, 220);
+    draw_mushroom(266, 214);
+
+    // --- wooden signpost menu ---
+    int postCX = 322, postW = 24, postT = 72, postB = 206;
+    int postL = postCX - postW / 2;
+    GFX_ELLIPSE(postCX - 20, postB - 7, 56, 14, (LCDColor)UI_SHADE);
+    GFX_FILL(postL + 4, postT + 4, postW, postB - postT, (LCDColor)UI_SHADE);
+    GFX_FILL(postL, postT, postW, postB - postT, kColorWhite);
+    GFX_RECT(postL, postT, postW, postB - postT, kColorBlack);
+    GFX_RECT(postL + 1, postT + 1, postW - 2, postB - postT - 2, kColorBlack);
+    GFX_FILL(postL - 3, postT - 5, postW + 6, 5, kColorBlack);          // cap
+    GFX_LINE(postCX + 2, postT + 8, postCX + 2, postB - 8, 1, kColorBlack);
+    GFX_LINE(postCX + 8, postT + 8, postCX + 8, postB - 8, 1, kColorBlack);
+    pd->graphics->drawEllipse(postCX + 1, 188, 9, 11, 1, 0, 360, kColorBlack);
+    draw_sign_plank(98,  "PLAY",   game.titleCursor == 0);
+    draw_sign_plank(134, "ROSTER", game.titleCursor == 1);
+    draw_sign_plank(170, "TEST",   game.titleCursor == 2);
+
+    // --- title banner with pennants ---
+    if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
+    const char* T = "AUTOCRANK";
+    int tW = pd->graphics->getTextWidth(game.fontLarge, T, strlen(T),
+                                        kASCIIEncoding, 0);
+    int bw = tW + 52, bh = 34, bx = (SCREEN_W - bw) / 2, by = 20;
+    GFX_FILL(bx + 5, by + 6, bw, bh, (LCDColor)UI_SHADE);          // shadow
+    draw_pennant(bx + 26,     by - 13, 16, false);                 // flags
+    draw_pennant(bx + bw / 2, by - 16, 18, true);
+    draw_pennant(bx + bw - 26, by - 13, 16, true);
+    pd->graphics->fillTriangle(bx, by + bh - 12, bx, by + bh,      // ribbon tails
+                               bx - 14, by + bh + 5, kColorBlack);
+    pd->graphics->fillTriangle(bx + bw, by + bh - 12, bx + bw, by + bh,
+                               bx + bw + 14, by + bh + 5, kColorBlack);
+    GFX_FILL(bx, by, bw, bh, kColorBlack);                         // banner
+    GFX_RECT(bx + 3, by + 3, bw - 6, bh - 6, kColorWhite);
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    pd->graphics->drawText(T, strlen(T), kASCIIEncoding,
+                           (SCREEN_W - tW) / 2, by + 7);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+    draw_text_halo_centered("- combat des reines -", game.fontSmall,
+                            by + bh + 2);
+
+    // --- lifetime stats + control hint along the bottom ---
     char buf[64];
-    snprintf(buf, sizeof(buf), "Runs %lu   Wins %lu   Best streak %lu",
+    snprintf(buf, sizeof(buf), "RUNS %lu   WINS %lu   BEST %lu",
              (unsigned long)game.totalRuns,
              (unsigned long)game.totalWins,
              (unsigned long)game.bestStreak);
-    title_text_centered(buf, game.fontSmall, 222);
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
+    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, 8, 224);
+    const char* hint = "up/down + A";
+    int hw = pd->graphics->getTextWidth(game.fontSmall, hint, strlen(hint),
+                                        kASCIIEncoding, 0);
+    pd->graphics->drawText(hint, strlen(hint), kASCIIEncoding,
+                           SCREEN_W - hw - 8, 224);
+    pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
 // ---------------------------------------------------------------------------
