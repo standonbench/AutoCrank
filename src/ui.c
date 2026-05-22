@@ -15,6 +15,40 @@ void ui_title_update(void) {
         selftest_run();
         game.state = STATE_SELFTEST;
     }
+    if (prs & kButtonUp) {
+        game.state = STATE_GALLERY;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Roster gallery — all 18 creatures in a grid (debug / art review)
+// ---------------------------------------------------------------------------
+void ui_gallery_render(void) {
+    GFX_FILL(0, 0, SCREEN_W, SCREEN_H, kColorWhite);
+    GFX_FILL(0, 0, SCREEN_W, 18, kColorBlack);
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    pd->graphics->drawText("ROSTER  -  18 alpine creatures", 30,
+                           kASCIIEncoding, 8, 2);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+
+    // 6 columns x 3 rows, each cell 64 wide x 70 tall
+    for (int i = 0; i < PET_COUNT; i++) {
+        int col = i % 6, row = i / 6;
+        int cx = 8 + col * 64;
+        int cy = 24 + row * 70;
+        GFX_FILL(cx, cy, 60, 50, kColorWhite);
+        GFX_RECT(cx, cy, 60, 50, kColorBlack);
+        draw_creature((uint8_t)i, cx + 14, cy + 9);
+        const char* nm = pet_name((uint8_t)i);
+        if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+        int w = pd->graphics->getTextWidth(game.fontSmall, nm, strlen(nm),
+                                           kASCIIEncoding, 0);
+        pd->graphics->drawText(nm, strlen(nm), kASCIIEncoding,
+                               cx + (60 - w) / 2, cy + 54);
+    }
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    pd->graphics->drawText("B: back", 7, kASCIIEncoding, 8, SCREEN_H - 13);
 }
 
 // Draw text horizontally centered on the screen at row y.
@@ -54,7 +88,7 @@ void ui_title_render(void) {
     // Prompts
     if ((game.titleBlinkTimer / 15) & 1)
         title_text_centered("PRESS A TO PLAY", game.fontBold, 182);
-    title_text_centered("B: self-test", game.fontSmall, 204);
+    title_text_centered("B: self-test    Up: roster", game.fontSmall, 204);
 
     char buf[64];
     snprintf(buf, sizeof(buf), "Runs %lu   Wins %lu   Best streak %lu",

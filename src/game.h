@@ -69,6 +69,7 @@ typedef enum {
     STATE_GAMEOVER,
     STATE_VICTORY,
     STATE_SELFTEST,
+    STATE_GALLERY,
 } GameState;
 
 // ---------------------------------------------------------------------------
@@ -307,6 +308,9 @@ void save_write(void);
 // selftest.c
 void selftest_run(void);
 void selftest_render(void);
+
+// ui.c gallery
+void ui_gallery_render(void);
 
 // creatures.c
 void draw_creature(uint8_t petId, int bx, int by);
