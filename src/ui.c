@@ -131,26 +131,33 @@ void ui_gameover_update(void) {
 }
 
 void ui_gameover_render(void) {
-    render_alpine_bg(150);
+    render_alpine_bg(154);
 
-    // Title plaque near the top.
-    int pw = 250, ph = 58, px = (SCREEN_W - pw) / 2, py = 24;
-    ui_plaque(px, py, pw, ph);
-    title_text_centered("GAME OVER", game.fontLarge, py + 9);
-    char buf[64];
-    snprintf(buf, sizeof(buf), "the herd made it to %d wins", game.wins);
-    title_text_centered(buf, game.fontSmall, py + 36);
+    // Full-width black title bar
+    GFX_FILL(0, 0, SCREEN_W, 44, kColorBlack);
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
+    const char* goLabel = "GAME OVER";
+    int glw = pd->graphics->getTextWidth(game.fontLarge, goLabel, strlen(goLabel),
+                                         kASCIIEncoding, 0);
+    pd->graphics->drawText(goLabel, strlen(goLabel), kASCIIEncoding,
+                           (SCREEN_W - glw) / 2, 11);
+    pd->graphics->setDrawMode(kDrawModeCopy);
 
     // A lone cow grazing on the empty pasture.
-    draw_creature_scaled(16, SCREEN_W / 2 - 32, 110, 2);
+    draw_creature_scaled(16, SCREEN_W / 2 - 32, 86, 2);
 
     // Dashed pasture line.
     for (int x = 30; x < SCREEN_W - 30; x += 6)
-        GFX_FILL(x, 178, 3, 2, kColorBlack);
+        GFX_FILL(x, 152, 3, 2, kColorBlack);
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "the herd made it to %d wins", game.wins);
+    title_text_centered(buf, game.fontSmall, 158);
 
     if ((game.frameCount / 15) & 1)
-        title_text_centered("PRESS A", game.fontBold, 198);
-    title_text_centered("back to the valley", game.fontSmall, 220);
+        title_text_centered("PRESS A", game.fontBold, 192);
+    title_text_centered("back to the valley", game.fontSmall, 216);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,23 +174,35 @@ void ui_victory_update(void) {
 }
 
 void ui_victory_render(void) {
-    render_alpine_bg(150);
+    render_alpine_bg(154);
 
-    // Title plaque.
-    int pw = 280, ph = 56, px = (SCREEN_W - pw) / 2, py = 18;
-    ui_plaque(px, py, pw, ph);
-    title_text_centered("CHAMPION!", game.fontLarge, py + 7);
-    title_text_centered("10 wins  -  queen of the alps", game.fontSmall,
-                        py + 35);
+    // Full-width black title bar
+    GFX_FILL(0, 0, SCREEN_W, 44, kColorBlack);
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
+    const char* champLabel = "CHAMPION!";
+    int champW = pd->graphics->getTextWidth(game.fontLarge, champLabel,
+                                            strlen(champLabel), kASCIIEncoding, 0);
+    pd->graphics->drawText(champLabel, strlen(champLabel), kASCIIEncoding,
+                           (SCREEN_W - champW) / 2, 11);
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%d wins  -  queen of the alps", WINS_TO_VICTORY);
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    int subW = pd->graphics->getTextWidth(game.fontSmall, buf, strlen(buf),
+                                          kASCIIEncoding, 0);
+    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding,
+                           (SCREEN_W - subW) / 2, 30);
+    pd->graphics->setDrawMode(kDrawModeCopy);
 
     // The Desalpe cow, descending the mountain crowned with edelweiss.
-    int cs = 3, cw = 32 * cs, cx = SCREEN_W / 2, cyTop = 92;
-    draw_creature_scaled(16, cx - cw / 2, cyTop, cs);
+    int cs = 3, cowPx = 32 * cs, cowCx = SCREEN_W / 2, cyTop = 54;
+    draw_creature_scaled(16, cowCx - cowPx / 2, cyTop, cs);
 
     // Flower crown — a gentle arch of edelweiss over the cow's head.
     static const int arch[5] = { 6, 2, 0, 2, 6 };
     for (int i = 0; i < 5; i++)
-        draw_flower(cx - 44 + i * 22, cyTop + 12 + arch[i], 4);
+        draw_flower(cowCx - 44 + i * 22, cyTop + 12 + arch[i], 4);
 
     // Petals tossed across the meadow in celebration.
     draw_flower(44, 96, 5);
@@ -252,26 +271,65 @@ void ui_result_update(void) {
 }
 
 void ui_result_render(void) {
-    render_battle_screen();
+    render_alpine_bg(90);
+    render_topbar();
 
-    // Central plaque — large enough to fully cover the line-up behind it.
-    int pw = 268, ph = 116;
-    int px = (SCREEN_W - pw) / 2, py = (SCREEN_H - ph) / 2 - 4;
-    ui_plaque(px, py, pw, ph);
+    // Full-width black banner at vertical centre
+    int by = 64, bh = 128;
+    GFX_FILL(0, by, SCREEN_W, bh, kColorBlack);
+    GFX_LINE(0, by,      SCREEN_W, by,      2, kColorWhite);
+    GFX_LINE(0, by + bh, SCREEN_W, by + bh, 2, kColorWhite);
 
+    // Result label
     const char* label = (game.battleResult == 0) ? "YOU WIN!"
                       : (game.battleResult == 1) ? "YOU LOSE"
                                                  : "A DRAW";
-    title_text_centered(label, game.fontLarge, py + 14);
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
+    int lw = pd->graphics->getTextWidth(game.fontLarge, label, strlen(label),
+                                        kASCIIEncoding, 0);
+    pd->graphics->drawText(label, strlen(label), kASCIIEncoding,
+                           (SCREEN_W - lw) / 2, by + 8);
 
-    int w = game.wins  + (game.battleResult == 0 ? 1 : 0);
-    int l = game.lives - (game.battleResult == 1 ? 1 : 0);
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%d / %d wins", w, WINS_TO_VICTORY);
-    title_text_centered(buf, game.fontBold, py + 48);
-    snprintf(buf, sizeof(buf), "%d lives remaining", l);
-    title_text_centered(buf, game.fontBold, py + 70);
+    // Win pips — one circle per win target, filled = achieved
+    int wins = game.wins + (game.battleResult == 0 ? 1 : 0);
+    int pipR = 6, pipStep = 16;
+    int pipStartX = (SCREEN_W - ((WINS_TO_VICTORY - 1) * pipStep + pipR * 2)) / 2 + pipR;
+    int pipY = by + 52;
+    for (int i = 0; i < WINS_TO_VICTORY; i++) {
+        int px = pipStartX + i * pipStep;
+        if (i < wins)
+            GFX_ELLIPSE(px - pipR, pipY - pipR, pipR * 2, pipR * 2, kColorWhite);
+        else
+            pd->graphics->drawEllipse(px - pipR, pipY - pipR, pipR * 2, pipR * 2,
+                                      1, 0, 360, kColorWhite);
+    }
 
-    if (game.resultTimer > 60 && ((game.frameCount / 15) & 1))
-        title_text_centered("PRESS A", game.fontSmall, py + ph - 22);
+    // Life hearts — filled white heart = remaining life
+    int lives = game.lives - (game.battleResult == 1 ? 1 : 0);
+    int hStep = 24;
+    int hStartX = (SCREEN_W - ((STARTING_LIVES - 1) * hStep + 12)) / 2 + 6;
+    int hY = by + 80;
+    for (int i = 0; i < STARTING_LIVES; i++) {
+        int hx = hStartX + i * hStep;
+        if (i < lives) {
+            GFX_ELLIPSE(hx - 5, hY - 4, 6, 6, kColorWhite);
+            GFX_ELLIPSE(hx - 1, hY - 4, 6, 6, kColorWhite);
+            pd->graphics->fillTriangle(hx - 5, hY, hx + 5, hY, hx, hY + 6, kColorWhite);
+        } else {
+            pd->graphics->drawEllipse(hx - 5, hY - 4, 6, 6, 1, 0, 360, kColorWhite);
+            pd->graphics->drawEllipse(hx - 1, hY - 4, 6, 6, 1, 0, 360, kColorWhite);
+        }
+    }
+
+    // PRESS A blink
+    if (game.resultTimer > 60 && ((game.frameCount / 15) & 1)) {
+        if (game.fontBold) pd->graphics->setFont(game.fontBold);
+        const char* pa = "PRESS A";
+        int pw = pd->graphics->getTextWidth(game.fontBold, pa, strlen(pa),
+                                            kASCIIEncoding, 0);
+        pd->graphics->drawText(pa, strlen(pa), kASCIIEncoding,
+                               (SCREEN_W - pw) / 2, by + 106);
+    }
+    pd->graphics->setDrawMode(kDrawModeCopy);
 }

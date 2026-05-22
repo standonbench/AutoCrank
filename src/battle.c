@@ -245,7 +245,7 @@ int battle_event_duration(uint8_t kind) {
         case BEV_CLASH:   return 34;   // rush in, collide, recoil — give it weight
         case BEV_ATTACK:  return 16;
         case BEV_DAMAGE:  return 13;
-        case BEV_FAINT:   return 28;   // KO launch needs room to fly off-screen
+        case BEV_FAINT:   return 42;   // stagger pause + fly-off arc
         case BEV_BUFF:    return 15;
         case BEV_SPAWN:   return 18;
         case BEV_ABILITY: return 14;

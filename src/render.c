@@ -471,26 +471,40 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
     int uy = BATTLE_FEET + dy;
 
     if (fainting) {
-        // KO launch — flung off-screen away from the foe with a hard spin.
-        int backDir = (side == 0) ? -1 : 1;     // player flies left, enemy right
-        float k     = fT * fT;                  // accelerating travel
-        int cxK = ux + backDir * (int)(k * 380.0f);
-        int cyK = uy - spr / 2 + (int)(fT * -250.0f + k * 110.0f);
-        float deg = fT * 540.0f * backDir;
-
-        // impact starburst at the launch point for the first few frames
-        if (fT < 0.32f) {
+        if (fT < 0.22f) {
+            // Stagger phase: unit reels in place while a burst radiates out.
+            float st = fT / 0.22f;
+            float shake = sinf(st * PI_F * 5.0f) * 6.0f * (1.0f - st * 0.6f);
+            int sx = ux + (int)(shake * (side == 0 ? 1.0f : -1.0f));
             int ix = ux, iy = uy - spr / 2;
-            int r = (int)(9 + fT * 64.0f);
-            for (int a = 0; a < 8; a++) {
-                float ang = a * (PI_F / 4.0f) + 0.39f;
-                GFX_LINE(ix + (int)(cosf(ang) * r * 0.40f),
-                         iy + (int)(sinf(ang) * r * 0.40f),
-                         ix + (int)(cosf(ang) * r),
-                         iy + (int)(sinf(ang) * r), 3, kColorBlack);
+            // 10-spoke burst + expanding ring
+            float burstK = st;
+            if (burstK < 0.75f) {
+                int r = (int)(4 + burstK * 46.0f);
+                for (int a = 0; a < 10; a++) {
+                    float ang = a * (PI_F / 5.0f) + 0.31f;
+                    GFX_LINE(ix + (int)(cosf(ang) * r * 0.30f),
+                             iy + (int)(sinf(ang) * r * 0.30f),
+                             ix + (int)(cosf(ang) * r),
+                             iy + (int)(sinf(ang) * r), 2, kColorBlack);
+                }
+                int rr = (int)(6 + burstK * 28.0f);
+                pd->graphics->drawEllipse(ix - rr, iy - rr, rr * 2, rr * 2,
+                                          2, 0, 360, kColorBlack);
             }
+            render_unit(p->id, p->level, p->atk, p->hp, p->food,
+                        sx, uy, BATTLE_SCALE, false, false, side == 1);
+        } else {
+            // Fly-off phase: accelerating arc off-screen with spin and scale punch.
+            float flyT = (fT - 0.22f) / 0.78f;
+            float k    = flyT * flyT;
+            int backDir = (side == 0) ? -1 : 1;
+            int cxK = ux + backDir * (int)(k * 480.0f);
+            int cyK = uy - spr / 2 + (int)(flyT * -340.0f + k * 300.0f);
+            float deg = flyT * 720.0f * (float)backDir;
+            float sc  = BATTLE_SCALE * (1.0f + 0.25f * (1.0f - flyT) * flyT * 4.0f);
+            draw_creature_xform(p->id, cxK, cyK, sc, deg, side == 1);
         }
-        draw_creature_xform(p->id, cxK, cyK, BATTLE_SCALE, deg, side == 1);
         return;
     }
 
