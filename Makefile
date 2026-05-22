@@ -22,5 +22,10 @@ UDEFS = -DDEBUG_BUILD=1
 
 include $(SDK)/C_API/buildsupport/common.mk
 
+# common.mk's simulator dylib rule only tracks .c files; add headers so a
+# header-only edit forces a dylib rebuild.
+SRCHDR = $(wildcard src/*.h)
+build/pdex.dylib: $(SRCHDR)
+
 run: all
 	open -a "$(SDK)/bin/Playdate Simulator.app" $(PRODUCT)

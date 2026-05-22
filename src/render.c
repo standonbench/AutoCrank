@@ -437,24 +437,30 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
 
     int spr = (int)(32 * BATTLE_SCALE);
     int dx = 0, dy = 0;
-    bool flash = false, fainting = false;
+    bool fainting = false;
     float fT = 0.0f;
 
     if (e) {
         if (e->kind == BEV_CLASH) {
-            // Sharp lunge across the gap, collide near centre, recoil.
-            if (side == 0 && slot == e->slot) {              // player front
-                dx = (int)(sinf(t * PI_F) * 34.0f);
-                flash = (t > 0.40f && t < 0.62f);
-            } else if (side == 1 && slot == e->data) {       // enemy front
-                dx = -(int)(sinf(t * PI_F) * 34.0f);
-                flash = (t > 0.40f && t < 0.62f);
+            // Rush in fast, strike near centre at t~0.42, recoil, settle.
+            if ((side == 0 && slot == e->slot) ||
+                (side == 1 && slot == e->data)) {
+                const float peak = 26.0f, contactT = 0.42f;
+                float lunge;
+                if (t < contactT) {
+                    float a = t / contactT;
+                    lunge = peak * a * a;                       // accelerate in
+                } else {
+                    float r = (t - contactT) / (1.0f - contactT);
+                    lunge = peak * (1.0f - r)
+                          - 7.0f * sinf(r * PI_F);              // recoil bounce
+                }
+                dx = (side == 0) ? (int)lunge : -(int)lunge;
             }
         } else if (e->kind == BEV_FAINT && e->side == side && e->slot == slot) {
             fainting = true; fT = t;
         } else if (e->kind == BEV_DAMAGE && e->side == side && e->slot == slot) {
-            dx = (int)(sinf(t * 40.0f) * 3.0f);
-            flash = ((int)(t * 6.0f) & 1) == 0;
+            dx = (int)(sinf(t * 38.0f) * 3.0f);                // quick hurt-shake
         } else if ((e->kind == BEV_BUFF || e->kind == BEV_ABILITY) &&
                    e->side == side && e->slot == slot) {
             dy = -(int)(sinf(t * PI_F) * 5.0f);
@@ -490,11 +496,6 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
 
     render_unit(p->id, p->level, p->atk, p->hp, p->food, ux, uy,
                 BATTLE_SCALE, false, false, side == 1);
-    if (flash) {
-        pd->graphics->setDrawMode(kDrawModeInverted);
-        GFX_FILL(ux - spr / 2, uy - spr, spr, spr, kColorBlack);
-        pd->graphics->setDrawMode(kDrawModeCopy);
-    }
 }
 
 void render_battle_screen(void)
@@ -504,6 +505,8 @@ void render_battle_screen(void)
 
     float t = 0.0f;
     BattleEvent* e = battle_cur_event(&t);
+    // Pre-battle just shows the static line-up — no event animation/popups.
+    if (game.state == STATE_PRE_BATTLE) { e = NULL; t = 0.0f; }
 
     // --- ease unit positions toward their ranked rest spots ---
     for (int side = 0; side < 2; side++) {
@@ -526,19 +529,24 @@ void render_battle_screen(void)
             if (game.battle.teams[side].slots[i].id != EMPTY_PET)
                 battle_draw_unit(e, t, side, i, g_unitX[side][i]);
 
-    // --- clash impact burst ---
-    if (e && e->kind == BEV_CLASH && t > 0.40f && t < 0.70f) {
-        int mx = ((int)g_unitX[0][e->slot] + (int)g_unitX[1][e->data]) / 2;
-        int my = BATTLE_FEET - (int)(32 * BATTLE_SCALE) / 2 - 6;
-        float k = (t - 0.40f) / 0.30f;          // 0..1
-        int r = (int)(6 + k * 16);
-        for (int a = 0; a < 8; a++) {
-            float ang = a * (PI_F / 4.0f);
-            int x1 = mx + (int)(cosf(ang) * r * 0.45f);
-            int y1 = my + (int)(sinf(ang) * r * 0.45f);
-            int x2 = mx + (int)(cosf(ang) * r);
-            int y2 = my + (int)(sinf(ang) * r);
-            GFX_LINE(x1, y1, x2, y2, 2, kColorBlack);
+    // --- clash impact: spark spokes + an expanding shock-ring at contact ---
+    if (e && e->kind == BEV_CLASH && t > 0.34f && t < 0.66f) {
+        int mx = BATTLE_CX;
+        int my = BATTLE_FEET - (int)(32 * BATTLE_SCALE) / 2 - 2;
+        float k = (t - 0.34f) / 0.32f;               // 0..1 across the effect
+        int r  = (int)(7 + k * 24);
+        int lw = (k < 0.45f) ? 3 : 2;
+        for (int a = 0; a < 6; a++) {
+            float ang = a * (PI_F / 3.0f) + 0.30f;
+            GFX_LINE(mx + (int)(cosf(ang) * r * 0.35f),
+                     my + (int)(sinf(ang) * r * 0.35f),
+                     mx + (int)(cosf(ang) * r),
+                     my + (int)(sinf(ang) * r), lw, kColorBlack);
+        }
+        if (k < 0.70f) {                             // expanding shock-ring
+            int rr = (int)(6 + k * 16);
+            pd->graphics->drawEllipse(mx - rr, my - rr, rr * 2, rr * 2,
+                                      2, 0, 360, kColorBlack);
         }
     }
 

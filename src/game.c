@@ -353,27 +353,33 @@ static void shop_action_b(void) {
 }
 
 // D-pad: up/down jumps rows; left/right moves within a row.
+// Shop pets and shop foods render on a single visual row, so they navigate
+// as one contiguous row (cursor 0 .. CUR_SHOP_FOOD_END-1).
 static void shop_navigate(PDButtons pressed) {
     CursorRow r = cursor_row(game.cursor);
+    bool inShop = (game.cursor < CUR_SHOP_FOOD_END);
 
     if (pressed & kButtonLeft) {
-        if (game.cursor > 0 && cursor_row((uint8_t)(game.cursor - 1)) == r) {
+        if (inShop) {
+            if (game.cursor > 0) game.cursor--;
+        } else if (game.cursor > 0 &&
+                   cursor_row((uint8_t)(game.cursor - 1)) == r) {
             game.cursor--;
         }
     }
     if (pressed & kButtonRight) {
-        if (game.cursor + 1 < CURSOR_COUNT &&
-            cursor_row((uint8_t)(game.cursor + 1)) == r) {
+        if (inShop) {
+            if (game.cursor + 1 < CUR_SHOP_FOOD_END) game.cursor++;
+        } else if (game.cursor + 1 < CURSOR_COUNT &&
+                   cursor_row((uint8_t)(game.cursor + 1)) == r) {
             game.cursor++;
         }
     }
     if (pressed & kButtonDown) {
-        // Move to row below at roughly same column.
-        if (r == ROW_SHOP_PETS || r == ROW_SHOP_FOODS) {
-            uint8_t col = (r == ROW_SHOP_PETS) ? game.cursor
-                                                : (uint8_t)(game.cursor - CUR_SHOP_PET_END);
-            uint8_t target = (uint8_t)(CUR_SHOP_FOOD_END + mini(col, TEAM_SIZE - 1));
-            game.cursor = target;
+        // Move to row below at roughly the same column.
+        if (inShop) {
+            game.cursor = (uint8_t)(CUR_SHOP_FOOD_END +
+                                    mini(game.cursor, TEAM_SIZE - 1));
         } else if (r == ROW_TEAM) {
             game.cursor = CUR_ROLL;
         }
@@ -383,7 +389,7 @@ static void shop_navigate(PDButtons pressed) {
             game.cursor = (uint8_t)(CUR_SHOP_FOOD_END + 0);  // first team slot
         } else if (r == ROW_TEAM) {
             uint8_t col = (uint8_t)(game.cursor - CUR_SHOP_FOOD_END);
-            game.cursor = (uint8_t)mini(col, MAX_SHOP_PETS - 1);
+            game.cursor = (uint8_t)mini(col, CUR_SHOP_FOOD_END - 1);
         }
     }
 

@@ -15,22 +15,33 @@ void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed) {
         out->slots[i].flags = 0;
     }
 
-    int petCount = clampi(1 + turn / 2, 1, TEAM_SIZE);
-    uint8_t maxTier = (turn >= 5) ? 3 : (turn >= 3 ? 2 : 1);
+    // Difficulty curve: trivial T1-2, mild T3-4, real T5-6, hard T7-8, wall T9-10.
+    int petCount = (turn <= 2) ? 1 :
+                   (turn <= 4) ? 2 :
+                   (turn <= 6) ? 3 :
+                   (turn <= 8) ? 4 : TEAM_SIZE;
+    uint8_t maxTier = (turn >= 7) ? 3 : (turn >= 4) ? 2 : 1;
+    int bump = (turn <= 4) ? 0 :
+               (turn <= 6) ? 1 :
+               (turn <= 8) ? 2 :
+               (turn <= 9) ? 3 : 4;
+    int lvl2Chance = (turn >= 9) ? 2 : (turn >= 7) ? 4 : 0;
+    bool allowLvl3 = (turn >= 10);
 
     for (int i = 0; i < petCount; i++) {
         uint8_t id = pet_random_in_tier(maxTier);
         const PetDef* def = pet_def(id);
-        out->slots[i].id = id;
-        // Stat bump: +1 atk/hp every 2 turns past turn 2
-        int bump = (turn > 2) ? (turn - 2) / 2 : 0;
+        out->slots[i].id  = id;
         out->slots[i].atk = (int16_t)mini(def->baseAtk + bump, STAT_CAP);
-        out->slots[i].hp  = (int16_t)mini(def->baseHp + bump, STAT_CAP);
-        // Occasional level 2 from turn 5+
-        if (turn >= 5 && (rng_next() & 0x3) == 0) {
-            out->slots[i].level = 2;
-            out->slots[i].atk = (int16_t)mini(out->slots[i].atk + 1, STAT_CAP);
-            out->slots[i].hp  = (int16_t)mini(out->slots[i].hp + 1, STAT_CAP);
+        out->slots[i].hp  = (int16_t)mini(def->baseHp  + bump, STAT_CAP);
+
+        if (lvl2Chance && (rng_next() % (uint32_t)lvl2Chance) == 0) {
+            uint8_t lvl = 2;
+            int extra = 1;
+            if (allowLvl3 && (rng_next() & 0x7) == 0) { lvl = 3; extra = 3; }
+            out->slots[i].level = lvl;
+            out->slots[i].atk = (int16_t)mini(out->slots[i].atk + extra, STAT_CAP);
+            out->slots[i].hp  = (int16_t)mini(out->slots[i].hp  + extra, STAT_CAP);
         }
     }
 
