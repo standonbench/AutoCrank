@@ -281,3 +281,17 @@ void draw_creature_scaled(uint8_t petId, int x, int y, float scale)
     pd->graphics->setDrawMode(kDrawModeCopy);
     pd->graphics->freeBitmap(bmp);
 }
+
+// Draw a creature scaled AND rotated about its centre (cx, cy).
+// Used for the faint tip-over.
+void draw_creature_xform(uint8_t petId, int cx, int cy, float scale, float deg)
+{
+    LCDBitmap* bmp = pd->graphics->newBitmap(32, 32, kColorWhite);
+    pd->graphics->pushContext(bmp);
+    draw_creature(petId, 0, 0);
+    pd->graphics->popContext();
+    pd->graphics->setDrawMode(kDrawModeWhiteTransparent);
+    pd->graphics->drawRotatedBitmap(bmp, cx, cy, deg, 0.5f, 0.5f, scale, scale);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+    pd->graphics->freeBitmap(bmp);
+}

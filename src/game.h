@@ -141,6 +141,8 @@ typedef enum {
     BEV_BUFF,
     BEV_ABILITY,
     BEV_RESULT,        // value: 0=player win, 1=loss, 2=draw
+    BEV_CLASH,         // front-line exchange: slot=player front, data=enemy
+                       // front, value low byte=player dmg, high byte=enemy dmg
 } BattleEventKind;
 
 typedef struct {
@@ -316,6 +318,7 @@ void ui_gallery_render(void);
 void draw_creature(uint8_t petId, int bx, int by);
 void draw_cow(int bx, int by, int variant);
 void draw_creature_scaled(uint8_t petId, int x, int y, float scale);
+void draw_creature_xform(uint8_t petId, int cx, int cy, float scale, float deg);
 
 // sound.c
 void sound_init(void);

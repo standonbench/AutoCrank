@@ -49,6 +49,26 @@ void apply_event(BattleState* bs, BattleEvent* e) {
             p->hp  = (int16_t)mini(p->hp + dh, STAT_CAP);
             break;
         }
+        case BEV_CLASH: {
+            // Front-line exchange: slot = player front, data = enemy front.
+            int pDmg = e->value & 0xFF;          // player deals -> enemy
+            int eDmg = (e->value >> 8) & 0xFF;   // enemy deals  -> player
+            PetSlot* pp = &bs->teams[0].slots[e->slot];
+            PetSlot* ee = &bs->teams[1].slots[e->data];
+            if (pp->id != EMPTY_PET) {
+                int d = eDmg;
+                if (pp->flags & 0x01) d = (d > 2) ? d - 2 : 0;
+                pp->hp -= (int16_t)d;
+                if (pp->hp < 0) pp->hp = 0;
+            }
+            if (ee->id != EMPTY_PET) {
+                int d = pDmg;
+                if (ee->flags & 0x01) d = (d > 2) ? d - 2 : 0;
+                ee->hp -= (int16_t)d;
+                if (ee->hp < 0) ee->hp = 0;
+            }
+            break;
+        }
         case BEV_ATTACK:
         case BEV_ABILITY:
         case BEV_RESULT:
@@ -193,13 +213,11 @@ void battle_simulate(void) {
         pp = &bs->teams[0].slots[p];
         ee = &bs->teams[1].slots[e];
 
-        // Mutual attack
-        int16_t pAtk = pp->atk;
-        int16_t eAtk = ee->atk;
-        battle_log_push(BEV_ATTACK, 0, (uint8_t)p, pAtk, (uint8_t)e);
-        battle_log_push(BEV_ATTACK, 1, (uint8_t)e, eAtk, (uint8_t)p);
-        battle_emit(bs, BEV_DAMAGE, 1, (uint8_t)e, pAtk, 0);
-        battle_emit(bs, BEV_DAMAGE, 0, (uint8_t)p, eAtk, 0);
+        // Front-line clash — one combined exchange event
+        int pAtk = pp->atk; if (pAtk > 255) pAtk = 255;
+        int eAtk = ee->atk; if (eAtk > 255) eAtk = 255;
+        int16_t packed = (int16_t)((pAtk & 0xFF) | ((eAtk & 0xFF) << 8));
+        battle_emit(bs, BEV_CLASH, 0, (uint8_t)p, packed, (uint8_t)e);
 
         // After attack triggers + faint resolution
         trig_push(TRIG_AFTER_ATTACK, 0, (uint8_t)p, (uint8_t)e, pAtk);
@@ -224,12 +242,13 @@ void battle_simulate(void) {
 // ---------------------------------------------------------------------------
 int battle_event_duration(uint8_t kind) {
     switch (kind) {
+        case BEV_CLASH:   return 22;   // rush in, collide, recoil
         case BEV_ATTACK:  return 10;
-        case BEV_DAMAGE:  return 7;
-        case BEV_FAINT:   return 11;
-        case BEV_BUFF:    return 8;
-        case BEV_SPAWN:   return 9;
-        case BEV_ABILITY: return 7;
+        case BEV_DAMAGE:  return 8;
+        case BEV_FAINT:   return 16;   // tip-over takes a moment
+        case BEV_BUFF:    return 9;
+        case BEV_SPAWN:   return 11;
+        case BEV_ABILITY: return 8;
         case BEV_RESULT:  return 2;
     }
     return 6;
