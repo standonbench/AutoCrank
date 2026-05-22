@@ -138,6 +138,33 @@ static void render_food_slot(uint8_t foodId, int x, int y, bool selected, bool f
 }
 
 // ---------------------------------------------------------------------------
+// Alpine mountain ridgeline — line-art peaks with hatched snowcaps.
+// Light & cozy: outline only, white interior. baseY = the horizon line.
+// ---------------------------------------------------------------------------
+void render_mountains(int baseY)
+{
+    pd->graphics->setDrawMode(kDrawModeCopy);
+    static const int peakH[9] = { 30, 52, 22, 44, 64, 34, 50, 26, 40 };
+    int n = 9;
+    int seg = SCREEN_W / n;          // ~44 px per peak
+    for (int i = 0; i < n; i++) {
+        int px    = i * seg;
+        int nx    = px + seg;
+        int peakX = px + seg / 2;
+        int peakY = baseY - peakH[i];
+        // slopes
+        GFX_LINE(px, baseY, peakX, peakY, 1, kColorBlack);
+        GFX_LINE(peakX, peakY, nx, baseY, 1, kColorBlack);
+        // snowcap — two short hatch strokes just below the summit
+        GFX_LINE(peakX - 5, peakY + 7, peakX - 1, peakY + 3, 1, kColorBlack);
+        GFX_LINE(peakX + 1, peakY + 3, peakX + 5, peakY + 7, 1, kColorBlack);
+        GFX_LINE(peakX - 3, peakY + 10, peakX, peakY + 7, 1, kColorBlack);
+        GFX_LINE(peakX, peakY + 7, peakX + 3, peakY + 10, 1, kColorBlack);
+    }
+    GFX_LINE(0, baseY, SCREEN_W, baseY, 1, kColorBlack);
+}
+
+// ---------------------------------------------------------------------------
 // Top bar (turn / gold / lives / wins)
 // ---------------------------------------------------------------------------
 void render_topbar(void)

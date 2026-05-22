@@ -17,30 +17,51 @@ void ui_title_update(void) {
     }
 }
 
-void ui_title_render(void) {
-    GFX_FILL(0, 0, SCREEN_W, SCREEN_H, kColorBlack);
-    pd->graphics->setDrawMode(kDrawModeFillWhite);
-    if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
-    pd->graphics->drawText("AutoCrank", 9, kASCIIEncoding, 130, 60);
-    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-    pd->graphics->drawText("a pocket autobattler", 20, kASCIIEncoding, 110, 100);
+// Draw text horizontally centered on the screen at row y.
+static void title_text_centered(const char* s, LCDFont* font, int y) {
+    if (font) pd->graphics->setFont(font);
+    int w = font ? pd->graphics->getTextWidth(font, s, strlen(s), kASCIIEncoding, 0)
+                  : (int)strlen(s) * 6;
+    pd->graphics->drawText(s, strlen(s), kASCIIEncoding, (SCREEN_W - w) / 2, y);
+}
 
-    if ((game.titleBlinkTimer / 15) & 1) {
-        if (game.fontBold) pd->graphics->setFont(game.fontBold);
-        pd->graphics->drawText("Press A to play", 15, kASCIIEncoding, 130, 158);
-    }
-    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-    pd->graphics->drawText("B: self-test", 12, kASCIIEncoding, 158, 182);
+void ui_title_render(void) {
+    // Light & cozy Alpine pasture.
+    GFX_FILL(0, 0, SCREEN_W, SCREEN_H, kColorWhite);
     pd->graphics->setDrawMode(kDrawModeCopy);
 
-    // TEMP: large procedural-creature preview strip for art iteration.
-    for (int v = 0; v < 3; v++) {
-        int px = 40 + v * 110;
-        int py = 120;
-        GFX_FILL(px - 3, py - 3, 96 + 6, 96 + 6, kColorWhite);
-        GFX_RECT(px - 3, py - 3, 96 + 6, 96 + 6, kColorBlack);
-        draw_creature_scaled((uint8_t)v, px, py, 3);
+    // Mountain ridgeline behind the title
+    render_mountains(74);
+
+    // Title — sits in a white plaque so it stays legible over the peaks
+    {
+        int pw = 200, ph = 30, px = (SCREEN_W - pw) / 2, py = 36;
+        GFX_FILL(px, py, pw, ph, kColorWhite);
+        GFX_RECT(px, py, pw, ph, kColorBlack);
+        GFX_RECT(px + 2, py + 2, pw - 4, ph - 4, kColorBlack);
     }
+    title_text_centered("AutoCrank", game.fontLarge, 42);
+    title_text_centered("- combat des reines -", game.fontSmall, 80);
+
+    // Hero cow grazing on the pasture
+    int cowScale = 2, cowW = 32 * cowScale;
+    draw_creature_scaled(16, (SCREEN_W - cowW) / 2, 104, cowScale);
+
+    // Pasture line (dashed)
+    for (int x = 20; x < SCREEN_W - 20; x += 6)
+        GFX_FILL(x, 170, 3, 2, kColorBlack);
+
+    // Prompts
+    if ((game.titleBlinkTimer / 15) & 1)
+        title_text_centered("PRESS A TO PLAY", game.fontBold, 182);
+    title_text_centered("B: self-test", game.fontSmall, 204);
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Runs %lu   Wins %lu   Best streak %lu",
+             (unsigned long)game.totalRuns,
+             (unsigned long)game.totalWins,
+             (unsigned long)game.bestStreak);
+    title_text_centered(buf, game.fontSmall, 222);
 }
 
 // ---------------------------------------------------------------------------

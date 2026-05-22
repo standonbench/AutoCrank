@@ -248,6 +248,7 @@ void render_pet_card(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
                      uint8_t heldFood, int x, int y, bool selected);
 void render_empty_slot(int x, int y, bool selected);
 void render_topbar(void);
+void render_mountains(int baseY);
 void render_shop_screen(void);
 void render_battle_screen(void);
 
