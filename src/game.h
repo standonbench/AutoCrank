@@ -68,6 +68,7 @@ typedef enum {
     STATE_RESULT,
     STATE_GAMEOVER,
     STATE_VICTORY,
+    STATE_SELFTEST,
 } GameState;
 
 // ---------------------------------------------------------------------------
@@ -301,6 +302,10 @@ void ui_result_render(void);
 // save.c
 void save_load(void);
 void save_write(void);
+
+// selftest.c
+void selftest_run(void);
+void selftest_render(void);
 
 // sound.c
 void sound_init(void);

@@ -11,6 +11,10 @@ void ui_title_update(void) {
     if (prs & kButtonA) {
         game_start_run();
     }
+    if (prs & kButtonB) {
+        selftest_run();
+        game.state = STATE_SELFTEST;
+    }
 }
 
 void ui_title_render(void) {
@@ -23,8 +27,10 @@ void ui_title_render(void) {
 
     if ((game.titleBlinkTimer / 15) & 1) {
         if (game.fontBold) pd->graphics->setFont(game.fontBold);
-        pd->graphics->drawText("Press A to play", 15, kASCIIEncoding, 130, 160);
+        pd->graphics->drawText("Press A to play", 15, kASCIIEncoding, 130, 158);
     }
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    pd->graphics->drawText("B: self-test", 12, kASCIIEncoding, 158, 182);
 
     if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
     char buf[64];

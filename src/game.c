@@ -456,6 +456,13 @@ int update(void* userdata)
         ui_victory_update();
         ui_victory_render();
         break;
+    case STATE_SELFTEST: {
+        PDButtons c2, p2, r2;
+        pd->system->getButtonState(&c2, &p2, &r2);
+        if (p2 & kButtonB) game.state = STATE_TITLE;
+        selftest_render();
+        break;
+    }
     }
 
     if (g_debugOverlay) pd->system->drawFPS(SCREEN_W - 22, 2);
