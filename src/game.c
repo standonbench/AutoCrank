@@ -196,10 +196,15 @@ void game_advance_to_battle(void)
     game.battle.teams[0] = game.player;
     game.battle.inBattle = true;
 
-    battle_simulate();              // populates battleLog
+    battle_simulate();              // populates battleLog (mutates teams[])
     game.battlePlayhead = 0;
     game.battleClock = 0.0f;
     game.battleSpeed = 1;
+
+    // battle_simulate() left teams[] in their end state — restore the starting
+    // line-up so the PRE_BATTLE screen shows the actual match-up.
+    game.battle.teams[0] = game.battle.initial[0];
+    game.battle.teams[1] = game.battle.initial[1];
 
     game.state = STATE_PRE_BATTLE;
     game.preBattleTimer = 60;       // 2 seconds at 30fps

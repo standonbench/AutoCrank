@@ -242,16 +242,16 @@ void battle_simulate(void) {
 // ---------------------------------------------------------------------------
 int battle_event_duration(uint8_t kind) {
     switch (kind) {
-        case BEV_CLASH:   return 22;   // rush in, collide, recoil
-        case BEV_ATTACK:  return 10;
-        case BEV_DAMAGE:  return 8;
-        case BEV_FAINT:   return 16;   // tip-over takes a moment
-        case BEV_BUFF:    return 9;
-        case BEV_SPAWN:   return 11;
-        case BEV_ABILITY: return 8;
-        case BEV_RESULT:  return 2;
+        case BEV_CLASH:   return 34;   // rush in, collide, recoil — give it weight
+        case BEV_ATTACK:  return 16;
+        case BEV_DAMAGE:  return 13;
+        case BEV_FAINT:   return 28;   // KO launch needs room to fly off-screen
+        case BEV_BUFF:    return 15;
+        case BEV_SPAWN:   return 18;
+        case BEV_ABILITY: return 14;
+        case BEV_RESULT:  return 3;
     }
-    return 6;
+    return 9;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,8 +268,10 @@ void battle_playback_step(void) {
     }
 
     // Crank-driven speed: 1x baseline, scales with rotation rate.
+    // A deadzone keeps idle crank jitter from quietly fast-forwarding.
     float crankChange = pd->system->getCrankChange();
     if (crankChange < 0) crankChange = -crankChange;
+    if (crankChange < 6.0f) crankChange = 0.0f;
     int speed = 1 + (int)(crankChange / 5.0f);
     if (speed < 1) speed = 1;
     if (speed > 8) speed = 8;

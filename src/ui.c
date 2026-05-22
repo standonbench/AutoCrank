@@ -160,19 +160,33 @@ void ui_pre_battle_update(void) {
 
 void ui_pre_battle_render(void) {
     render_battle_screen();
-    // "Round N" banner — a centered black bar so it never overlaps pets.
+    // "Round N" banner — a centered black bar high on the ridgeline so it
+    // never overlaps the two line-ups below.
     char buf[32];
     snprintf(buf, sizeof(buf), "ROUND %d", game.turn);
-    int bw = 160, bh = 32;
-    int bx = (SCREEN_W - bw) / 2, by = SCREEN_H / 2 - bh / 2;
+    int bw = 168, bh = 30;
+    int bx = (SCREEN_W - bw) / 2, by = 26;
     GFX_FILL(bx, by, bw, bh, kColorBlack);
-    GFX_RECT(bx - 2, by - 2, bw + 4, bh + 4, kColorBlack);
+    GFX_RECT(bx - 2, by - 2, bw + 4, bh + 4, kColorWhite);
+    GFX_RECT(bx - 3, by - 3, bw + 6, bh + 6, kColorBlack);
     pd->graphics->setDrawMode(kDrawModeFillWhite);
     if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
     int tw = pd->graphics->getTextWidth(game.fontLarge, buf, strlen(buf),
                                         kASCIIEncoding, 0);
     pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding,
-                           bx + (bw - tw) / 2, by + 6);
+                           bx + (bw - tw) / 2, by + 5);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+
+    // "VS" mark on the centre line between the two teams.
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    int vw = pd->graphics->getTextWidth(game.fontBold, "VS", 2,
+                                        kASCIIEncoding, 0);
+    int vx = (SCREEN_W - vw) / 2, vy = 118;
+    GFX_ELLIPSE(SCREEN_W / 2 - 16, vy - 4, 32, 26, kColorWhite);
+    pd->graphics->drawEllipse(SCREEN_W / 2 - 16, vy - 4, 32, 26, 2,
+                              0, 360, kColorBlack);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
+    pd->graphics->drawText("VS", 2, kASCIIEncoding, vx, vy + 1);
     pd->graphics->setDrawMode(kDrawModeCopy);
 }
 

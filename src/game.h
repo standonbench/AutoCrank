@@ -253,7 +253,7 @@ void render_shop_screen(void);
 void render_battle_screen(void);
 void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
                  uint8_t heldFood, int cx, int baseY, float spriteScale,
-                 bool selected, bool picked);
+                 bool selected, bool picked, bool faceLeft);
 
 // shop.c
 void shop_init_run(void);
@@ -318,7 +318,8 @@ void ui_gallery_render(void);
 void draw_creature(uint8_t petId, int bx, int by);
 void draw_cow(int bx, int by, int variant);
 void draw_creature_scaled(uint8_t petId, int x, int y, float scale);
-void draw_creature_xform(uint8_t petId, int cx, int cy, float scale, float deg);
+void draw_creature_xform(uint8_t petId, int cx, int cy, float scale,
+                         float deg, bool flip);
 
 // sound.c
 void sound_init(void);

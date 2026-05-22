@@ -36,33 +36,33 @@ static void fill_pat(int x, int y, int w, int h, LCDPattern pat) {
 static void badge_number(int cx, int cy, int val) {
     char b[8];
     snprintf(b, sizeof(b), "%d", val);
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    int w = game.fontBold
-            ? pd->graphics->getTextWidth(game.fontBold, b, strlen(b),
-                                         kASCIIEncoding, 0)
-            : (int)strlen(b) * 7;
+    LCDFont* f = game.fontBold;
+    if (f) pd->graphics->setFont(f);
+    int w = f ? pd->graphics->getTextWidth(f, b, strlen(b), kASCIIEncoding, 0)
+              : (int)strlen(b) * 7;
     pd->graphics->setDrawMode(kDrawModeFillWhite);
-    pd->graphics->drawText(b, strlen(b), kASCIIEncoding, cx - w / 2 + 1, cy - 8);
+    pd->graphics->drawText(b, strlen(b), kASCIIEncoding, cx - w / 2, cy - 9);
     pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
-// Attack — a bold black disc with a white halo.
+// Attack — a bold black disc with a crisp white ring so it pops off any
+// background and reads clearly even when units crowd together.
 static void badge_atk(int cx, int cy, int val) {
-    GFX_ELLIPSE(cx - 12, cy - 12, 24, 24, kColorWhite);
-    GFX_ELLIPSE(cx - 10, cy - 10, 20, 20, kColorBlack);
+    GFX_ELLIPSE(cx - 11, cy - 11, 22, 22, kColorWhite);
+    GFX_ELLIPSE(cx - 9,  cy - 9,  18, 18, kColorBlack);
     badge_number(cx, cy, val);
 }
 
-// Health — a bold black heart with a white halo.
+// Health — a bold black heart with the same white ring treatment.
 static void badge_hp(int cx, int cy, int val) {
-    GFX_ELLIPSE(cx - 12, cy - 11, 13, 13, kColorWhite);
-    GFX_ELLIPSE(cx - 1,  cy - 11, 13, 13, kColorWhite);
-    pd->graphics->fillTriangle(cx - 12, cy - 4, cx + 12, cy - 4,
-                               cx, cy + 12, kColorWhite);
-    GFX_ELLIPSE(cx - 10, cy - 9, 11, 11, kColorBlack);
-    GFX_ELLIPSE(cx - 1,  cy - 9, 11, 11, kColorBlack);
-    pd->graphics->fillTriangle(cx - 10, cy - 3, cx + 10, cy - 3,
-                               cx, cy + 10, kColorBlack);
+    GFX_ELLIPSE(cx - 11, cy - 10, 12, 12, kColorWhite);
+    GFX_ELLIPSE(cx - 1,  cy - 10, 12, 12, kColorWhite);
+    pd->graphics->fillTriangle(cx - 11, cy - 3, cx + 11, cy - 3,
+                               cx, cy + 11, kColorWhite);
+    GFX_ELLIPSE(cx - 9, cy - 8, 10, 10, kColorBlack);
+    GFX_ELLIPSE(cx - 1, cy - 8, 10, 10, kColorBlack);
+    pd->graphics->fillTriangle(cx - 9, cy - 2, cx + 9, cy - 2,
+                               cx, cy + 9, kColorBlack);
     badge_number(cx, cy, val);
 }
 
@@ -73,7 +73,7 @@ static void badge_hp(int cx, int cy, int val) {
 // ---------------------------------------------------------------------------
 void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
                  uint8_t heldFood, int cx, int baseY, float spriteScale,
-                 bool selected, bool picked)
+                 bool selected, bool picked, bool faceLeft)
 {
     int spr = (int)(32.0f * spriteScale);
     int half = spr / 2;
@@ -97,8 +97,8 @@ void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
                                   picked ? 3 : 2, 0, 360, kColorBlack);
     }
 
-    // sprite (feet on baseY)
-    draw_creature_scaled(petId, cx - half, baseY - spr, spriteScale);
+    // sprite (feet on baseY) — faceLeft mirrors the right-facing art
+    draw_creature_xform(petId, cx, baseY - half, spriteScale, 0.0f, faceLeft);
 
     // level pips above the head
     int npip = level; if (npip > MAX_PET_LEVEL) npip = MAX_PET_LEVEL;
@@ -124,9 +124,11 @@ void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
                                    cx + half + 2, baseY - half + 6, kColorBlack);
     }
 
-    // stat badges, overlapping the lower corners
-    badge_atk(cx - half + 8, baseY - 6, atk);
-    badge_hp (cx + half - 8, baseY - 6, hp);
+    // stat badges — tucked inside the lower corners so they never collide
+    // with the neighbouring unit's badges.
+    int bo = half - 11;
+    badge_atk(cx - bo, baseY - 7, atk);
+    badge_hp (cx + bo, baseY - 7, hp);
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +313,8 @@ void render_shop_screen(void)
             const PetDef* d = pet_def(pid);
             if (d) { a = d->baseAtk; h = d->baseHp; }
         }
-        render_unit(pid, 0, a, h, EMPTY_FOOD, colX[i], shopFeet, SC, sel, false);
+        render_unit(pid, 0, a, h, EMPTY_FOOD, colX[i], shopFeet, SC, sel,
+                    false, false);
         if (pid != EMPTY_PET) {
             // cost tag above the creature
             int cy = shopFeet - (int)(32 * SC) - 8;
@@ -349,7 +352,7 @@ void render_shop_screen(void)
         bool picked = (game.selectedTeamSlot == i);
         PetSlot* p = &game.player.slots[i];
         render_unit(p->id, p->level, p->atk, p->hp, p->food,
-                    colX[i], teamFeet, SC, sel, picked);
+                    colX[i], teamFeet, SC, sel, picked, false);
     }
 
     // --- Action bar ---
@@ -397,17 +400,18 @@ static BattleEvent* battle_cur_event(float* tOut) {
 }
 
 #define BATTLE_FEET   162
-#define BATTLE_STEP   58
-#define BATTLE_SCALE  1.6f
+#define BATTLE_STEP   50
+#define BATTLE_SCALE  1.4f
 #define BATTLE_CX     (SCREEN_W / 2)
 
 // Eased on-screen X per unit, so the line slides forward as units fall.
 static float g_unitX[2][TEAM_SIZE];
 
-// Rest position for a unit at a given rank (0 = frontline, nearest centre).
+// Rest position for a unit at a given rank (0 = frontline). The frontline
+// units rest with a clear gap so the clash lunge across it reads.
 static int unit_target_x(int side, int rank) {
-    return (side == 0) ? BATTLE_CX - 32 - rank * BATTLE_STEP
-                       : BATTLE_CX + 32 + rank * BATTLE_STEP;
+    return (side == 0) ? BATTLE_CX - 46 - rank * BATTLE_STEP
+                       : BATTLE_CX + 46 + rank * BATTLE_STEP;
 }
 
 // A floating number with a white halo, rising as t advances.
@@ -438,14 +442,13 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
 
     if (e) {
         if (e->kind == BEV_CLASH) {
+            // Sharp lunge across the gap, collide near centre, recoil.
             if (side == 0 && slot == e->slot) {              // player front
-                int reach = BATTLE_CX - 30 - (int)fx;
-                dx = (int)(sinf(t * PI_F) * (float)reach);
-                flash = (t > 0.42f && t < 0.62f);
+                dx = (int)(sinf(t * PI_F) * 34.0f);
+                flash = (t > 0.40f && t < 0.62f);
             } else if (side == 1 && slot == e->data) {       // enemy front
-                int reach = (int)fx - BATTLE_CX - 30;
-                dx = -(int)(sinf(t * PI_F) * (float)reach);
-                flash = (t > 0.42f && t < 0.62f);
+                dx = -(int)(sinf(t * PI_F) * 34.0f);
+                flash = (t > 0.40f && t < 0.62f);
             }
         } else if (e->kind == BEV_FAINT && e->side == side && e->slot == slot) {
             fainting = true; fT = t;
@@ -462,20 +465,31 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
     int uy = BATTLE_FEET + dy;
 
     if (fainting) {
-        // tip over (cow-tipping!) and slide down, strobing near the end
-        float deg = fT * 82.0f * (side == 0 ? 1.0f : -1.0f);
-        int drop = (int)(fT * fT * 16.0f);
-        draw_creature_xform(p->id, ux, uy - spr / 2 + drop, BATTLE_SCALE, deg);
-        if (fT > 0.55f && ((int)(fT * 14.0f) & 1)) {
-            pd->graphics->setDrawMode(kDrawModeInverted);
-            GFX_FILL(ux - spr / 2, uy - spr + drop, spr, spr, kColorBlack);
-            pd->graphics->setDrawMode(kDrawModeCopy);
+        // KO launch — flung off-screen away from the foe with a hard spin.
+        int backDir = (side == 0) ? -1 : 1;     // player flies left, enemy right
+        float k     = fT * fT;                  // accelerating travel
+        int cxK = ux + backDir * (int)(k * 380.0f);
+        int cyK = uy - spr / 2 + (int)(fT * -250.0f + k * 110.0f);
+        float deg = fT * 540.0f * backDir;
+
+        // impact starburst at the launch point for the first few frames
+        if (fT < 0.32f) {
+            int ix = ux, iy = uy - spr / 2;
+            int r = (int)(9 + fT * 64.0f);
+            for (int a = 0; a < 8; a++) {
+                float ang = a * (PI_F / 4.0f) + 0.39f;
+                GFX_LINE(ix + (int)(cosf(ang) * r * 0.40f),
+                         iy + (int)(sinf(ang) * r * 0.40f),
+                         ix + (int)(cosf(ang) * r),
+                         iy + (int)(sinf(ang) * r), 3, kColorBlack);
+            }
         }
+        draw_creature_xform(p->id, cxK, cyK, BATTLE_SCALE, deg, side == 1);
         return;
     }
 
     render_unit(p->id, p->level, p->atk, p->hp, p->food, ux, uy,
-                BATTLE_SCALE, false, false);
+                BATTLE_SCALE, false, false, side == 1);
     if (flash) {
         pd->graphics->setDrawMode(kDrawModeInverted);
         GFX_FILL(ux - spr / 2, uy - spr, spr, spr, kColorBlack);
@@ -511,6 +525,22 @@ void render_battle_screen(void)
         for (int i = 0; i < TEAM_SIZE; i++)
             if (game.battle.teams[side].slots[i].id != EMPTY_PET)
                 battle_draw_unit(e, t, side, i, g_unitX[side][i]);
+
+    // --- clash impact burst ---
+    if (e && e->kind == BEV_CLASH && t > 0.40f && t < 0.70f) {
+        int mx = ((int)g_unitX[0][e->slot] + (int)g_unitX[1][e->data]) / 2;
+        int my = BATTLE_FEET - (int)(32 * BATTLE_SCALE) / 2 - 6;
+        float k = (t - 0.40f) / 0.30f;          // 0..1
+        int r = (int)(6 + k * 16);
+        for (int a = 0; a < 8; a++) {
+            float ang = a * (PI_F / 4.0f);
+            int x1 = mx + (int)(cosf(ang) * r * 0.45f);
+            int y1 = my + (int)(sinf(ang) * r * 0.45f);
+            int x2 = mx + (int)(cosf(ang) * r);
+            int y2 = my + (int)(sinf(ang) * r);
+            GFX_LINE(x1, y1, x2, y2, 2, kColorBlack);
+        }
+    }
 
     // --- combat-text popups ---
     int popTop = BATTLE_FEET - (int)(32 * BATTLE_SCALE) - 14;
