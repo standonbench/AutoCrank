@@ -162,7 +162,83 @@ void selftest_run(void) {
         check("Combine to level 2", game.player.slots[0].level == 2);
     }
 
-    // T12: Determinism — same opponent seed yields identical teams.
+    // T12: Frog end-of-turn buffs the ally on its left (+1/+1).
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mk(0, 1, 2);   // Mouse
+        game.player.slots[1] = mk(2, 1, 3);   // Frog
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.turn = 1;
+        shop_end_turn_advance();
+        check("Frog end-of-turn buff", game.player.slots[0].atk == 2);
+    }
+
+    // T13: Horse buffs a newly summoned friend (+1 atk).
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mk(8, 1, 1);   // Horse
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.pets[0] = 0;                // Mouse
+        game.shop.gold = 100;
+        shop_try_buy_pet(0, 1);               // Mouse summoned into slot 1
+        check("Horse summon buff", game.player.slots[1].atk == 2);
+    }
+
+    // T14: Spider faint summons a Tier-1 pet (BEV_SPAWN of a T1 id).
+    {
+        PetSlot p[] = { mk(11, 1, 1) };
+        PetSlot e[] = { mk(0, 50, 50) };
+        run_battle(p, 1, e, 1);
+        bool t1spawn = false;
+        for (int i = 0; i < game.battleLogLen; i++) {
+            if (game.battleLog[i].kind == BEV_SPAWN) {
+                const PetDef* d = pet_def(game.battleLog[i].data);
+                if (d && d->tier == 1) t1spawn = true;
+            }
+        }
+        check("Spider faint summons T1", t1spawn);
+    }
+
+    // T15: Dragon — buying a T1 pet gives every ally +1/+1.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mk(17, 6, 8);  // Dragon
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.pets[0] = 0;                // Mouse (T1)
+        game.shop.gold = 100;
+        shop_try_buy_pet(0, 1);
+        check("Dragon buy-T1 team buff", game.player.slots[0].atk == 7);
+    }
+
+    // T16: Tiger re-fires the right neighbour's start-of-battle ability.
+    // Tiger+Croc deal 16 to the last enemy, killing a 12-HP Mouse pre-combat.
+    {
+        PetSlot p[] = { mk(16, 4, 1), mk(12, 1, 1) };  // Tiger, Crocodile
+        PetSlot e[] = { mk(0, 1, 12) };
+        check("Tiger re-fires neighbour", run_battle(p, 2, e, 1) == 0);
+    }
+
+    // T17: Parrot copies the left neighbour's start-of-battle ability.
+    {
+        PetSlot p[] = { mk(12, 1, 1), mk(15, 3, 1) };  // Crocodile, Parrot
+        PetSlot e[] = { mk(0, 1, 12) };
+        check("Parrot copies neighbour", run_battle(p, 2, e, 1) == 0);
+    }
+
+    // T18: Whale faint death-bomb (5 dmg) kills the enemy back -> draw.
+    {
+        PetSlot p[] = { mk(13, 1, 1) };
+        PetSlot e[] = { mk(0, 1, 5) };
+        check("Whale faint death-bomb", run_battle(p, 1, e, 1) == 2);
+    }
+
+    // T19: Determinism — same opponent seed yields identical teams.
     {
         Team a, b;
         ai_generate_opponent(&a, 5, 0xCAFEBABE);

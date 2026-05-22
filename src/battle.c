@@ -165,8 +165,9 @@ void battle_simulate(void) {
     bs->initial[1] = bs->teams[1];
 
     // Start of battle: fire trigger (no handlers wired yet, but log abilities).
+    // One global start-of-battle event — the dispatcher fans it out to every
+    // pet on both sides, each firing its own handler exactly once.
     trig_push(TRIG_START_OF_BATTLE, 0, 0, 0, 0);
-    trig_push(TRIG_START_OF_BATTLE, 1, 0, 0, 0);
     trig_drain(bs);
     resolve_faints(bs);
 

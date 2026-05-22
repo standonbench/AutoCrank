@@ -139,12 +139,8 @@ void shop_toggle_freeze_food(uint8_t shopSlot) {
 }
 
 void shop_end_turn_advance(void) {
-    // Fire END_OF_TURN for the team's pets (Frog/Parrot care).
-    for (int i = 0; i < TEAM_SIZE; i++) {
-        if (game.player.slots[i].id != EMPTY_PET) {
-            trig_push(TRIG_END_OF_TURN, 0, (uint8_t)i, (uint8_t)i, 0);
-        }
-    }
+    // One global end-of-turn event — the dispatcher fans it out to every pet.
+    trig_push(TRIG_END_OF_TURN, 0, 0, 0, 0);
     trig_shop_drain();
 
     game.turn++;

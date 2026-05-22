@@ -21,8 +21,9 @@ static void pet_spider_faint    (BattleState* bs, uint8_t side, uint8_t slot, Tr
 static void pet_croc_sob        (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_boar_beforeatk  (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_dragon_buy      (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
-
-// Whale/Parrot/Tiger are deferred to v0.1 — handlers are NULL.
+static void pet_tiger_sob       (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
+static void pet_parrot_sob      (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
+static void pet_whale_faint     (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 
 // Forward-declared so handlers/foods can spawn or apply
 static void summon_pet_in_slot(BattleState* bs, uint8_t side, uint8_t slot,
@@ -68,10 +69,10 @@ const PetDef PETS[PET_COUNT] = {
     [11] = { "Spider",    2, 2, 2, 11, { H_FAINT  pet_spider_faint } },
     // Tier 3
     [12] = { "Crocodile", 5, 3, 3, 12, { H_SOB    pet_croc_sob } },
-    [13] = { "Whale",     3, 8, 3, 13, { 0 } },               // deferred
+    [13] = { "Whale",     3, 8, 3, 13, { H_FAINT  pet_whale_faint } },
     [14] = { "Boar",      8, 6, 3, 14, { H_BEFOREATK pet_boar_beforeatk } },
-    [15] = { "Parrot",    3, 3, 3, 15, { 0 } },               // deferred
-    [16] = { "Tiger",     4, 3, 3, 16, { 0 } },               // deferred
+    [15] = { "Parrot",    3, 3, 3, 15, { H_SOB    pet_parrot_sob } },
+    [16] = { "Tiger",     4, 3, 3, 16, { H_SOB    pet_tiger_sob } },
     [17] = { "Dragon",    6, 8, 3, 17, { H_BUY    pet_dragon_buy } },
 };
 
@@ -326,6 +327,58 @@ static void pet_dragon_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerE
         if (bs->teams[side].slots[i].id == EMPTY_PET) continue;
         battle_emit(bs, BEV_BUFF, side, (uint8_t)i, encode_pair(1, 1), 0);
     }
+}
+
+// --- "Exploding synergy" pets: Tiger / Parrot re-fire neighbour abilities ---
+// Recursion guard so Tiger-next-to-Parrot-next-to-Tiger can't loop forever.
+static int g_abilityDepth = 0;
+#define ABILITY_MAX_DEPTH 6
+
+static void pet_tiger_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Re-fire the start-of-battle ability of the pet on our RIGHT (slot+1),
+    // once per Tiger level. Turns a Crocodile/Bee next to Tiger into a combo.
+    if (g_abilityDepth >= ABILITY_MAX_DEPTH) return;
+    int r = (int)slot + 1;
+    if (r >= TEAM_SIZE) return;
+    PetSlot* p = &bs->teams[side].slots[r];
+    if (p->id == EMPTY_PET) return;
+    const PetDef* def = pet_def(p->id);
+    if (!def) return;
+    PetHandler h = def->handlers[TRIG_START_OF_BATTLE];
+    if (!h) return;
+    int times = (int)bs->teams[side].slots[slot].level;  // L1=1, L2=2, L3=3
+    g_abilityDepth++;
+    for (int i = 0; i < times; i++) h(bs, side, (uint8_t)r, ev);
+    g_abilityDepth--;
+}
+
+static void pet_parrot_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Copy the start-of-battle ability of the pet on our LEFT (slot-1) and
+    // perform it AS the Parrot (using Parrot's own slot/level).
+    if (g_abilityDepth >= ABILITY_MAX_DEPTH) return;
+    int l = (int)slot - 1;
+    if (l < 0) return;
+    PetSlot* p = &bs->teams[side].slots[l];
+    if (p->id == EMPTY_PET) return;
+    const PetDef* def = pet_def(p->id);
+    if (!def) return;
+    PetHandler h = def->handlers[TRIG_START_OF_BATTLE];
+    if (!h) return;
+    g_abilityDepth++;
+    h(bs, side, slot, ev);   // run the copied ability as ourselves
+    g_abilityDepth--;
+}
+
+static void pet_whale_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Death-bomb: on faint, deal (5 x level) damage to a random enemy.
+    if (ev->side != side || ev->srcSlot != slot) return;
+    int lvl = (int)bs->teams[side].slots[slot].level;
+    int dmg = 5 * lvl;
+    int targetSide = side ^ 1;
+    int t = random_alive_slot_side(bs, (uint8_t)targetSide);
+    if (t < 0) return;
+    deal_damage_to_slot(bs, (uint8_t)targetSide, t, dmg);
+    battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)t);
 }
 
 // ---------------------------------------------------------------------------
