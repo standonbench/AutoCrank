@@ -262,12 +262,12 @@ void selftest_run(void) {
         check("Empty vs empty -> draw", run_battle(NULL, 0, NULL, 0) == 2);
     }
 
-    // T22: Apple food gives the target +1/+1.
+    // T22: Hay food gives the target +1/+1.
     {
         clear_team(&game.player);
         game.player.slots[0] = mk(0, 1, 2);
         if (FOODS[0].apply) FOODS[0].apply(&game.player, 0);
-        check("Apple food +1/+1",
+        check("Hay food +1/+1",
               game.player.slots[0].atk == 2 && game.player.slots[0].hp == 3);
     }
 

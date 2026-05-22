@@ -111,12 +111,13 @@ uint8_t pet_random_in_tier(uint8_t maxTier) {
 // Foods (handlers for the simpler ones; others are stubs for now)
 // ---------------------------------------------------------------------------
 const FoodDef FOODS[FOOD_COUNT] = {
-    [0] = { "Apple",         3, 0, true,  food_apple_apply },
-    [1] = { "Honey",         3, 1, true,  food_honey_apply },
-    [2] = { "Meat Bone",     3, 2, true,  food_meatbone_apply },
-    [3] = { "Garlic",        3, 3, true,  food_garlic_apply },
-    [4] = { "Sleeping Pill", 1, 4, true,  food_sleepingpill_apply },
-    [5] = { "Milk",          3, 5, false, food_milk_apply },
+    // Alpine reskin — same mechanics, Swiss-pasture flavour.
+    [0] = { "Hay",       3, 0, true,  food_apple_apply },        // +1/+1
+    [1] = { "Edelweiss", 3, 1, true,  food_honey_apply },        // faint -> Bee Buddy
+    [2] = { "Salt Lick", 3, 2, true,  food_meatbone_apply },     // +5 atk this battle
+    [3] = { "Cowbell",   3, 3, true,  food_garlic_apply },       // -2 damage taken
+    [4] = { "Cheese",    1, 4, true,  food_sleepingpill_apply }, // faint immediately
+    [5] = { "Milk",      3, 5, false, food_milk_apply },         // random T1 ally +2/+2
 };
 
 // ---------------------------------------------------------------------------
@@ -399,7 +400,7 @@ static void food_honey_apply(Team* team, uint8_t targetSlot) {
     if (targetSlot >= TEAM_SIZE) return;
     PetSlot* p = &team->slots[targetSlot];
     if (p->id == EMPTY_PET) return;
-    p->food = 1;  // Honey held-item flag: spawn Bee Buddy on faint (handled at faint time later)
+    p->food = 1;  // Edelweiss held-item flag: spawn Bee Buddy on faint
 }
 
 static void food_meatbone_apply(Team* team, uint8_t targetSlot) {
