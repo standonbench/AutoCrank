@@ -6,6 +6,102 @@
 extern bool g_debugOverlay;
 
 // ---------------------------------------------------------------------------
+// Shop layout — exposed via game.h so shop.c can anchor popups to slots.
+// ---------------------------------------------------------------------------
+const int SHOP_COL_X[3] = { 36, 92, 148 };
+const int TEAM_COL_X[5] = { 36, 92, 148, 204, 260 };
+const int FOOD_COL_X[2] = { 322, 366 };
+
+// ---------------------------------------------------------------------------
+// Shop popup buffer — small ring of floating text + sparks. Pushed by
+// shop.c on every gold/level/sell action, drained at the end of
+// render_shop_screen and aged per draw call.
+// ---------------------------------------------------------------------------
+#define SHOP_POPUP_COUNT 8
+#define SHOP_POPUP_LIFE  36
+
+typedef struct {
+    int16_t cx, cy;
+    int16_t age;            // -1 = free slot
+    uint8_t kind;           // 0 = text, 1 = burst
+    char    text[14];
+} ShopPopup;
+
+static ShopPopup g_pops[SHOP_POPUP_COUNT];
+
+static ShopPopup* shop_popup_alloc(void) {
+    // Prefer a free slot; else overwrite the oldest.
+    int oldestIdx = 0, oldestAge = -1;
+    for (int i = 0; i < SHOP_POPUP_COUNT; i++) {
+        if (g_pops[i].age < 0) return &g_pops[i];
+        if (g_pops[i].age > oldestAge) { oldestAge = g_pops[i].age; oldestIdx = i; }
+    }
+    return &g_pops[oldestIdx];
+}
+
+void shop_popup_text(int cx, int cy, const char* s) {
+    ShopPopup* p = shop_popup_alloc();
+    p->cx = (int16_t)cx;
+    p->cy = (int16_t)cy;
+    p->age = 0;
+    p->kind = 0;
+    int n = 0;
+    while (n + 1 < (int)sizeof(p->text) && s && s[n]) { p->text[n] = s[n]; n++; }
+    p->text[n] = 0;
+}
+
+void shop_popup_burst(int cx, int cy) {
+    ShopPopup* p = shop_popup_alloc();
+    p->cx = (int16_t)cx;
+    p->cy = (int16_t)cy;
+    p->age = 0;
+    p->kind = 1;
+    p->text[0] = 0;
+}
+
+void shop_popup_clear(void) {
+    for (int i = 0; i < SHOP_POPUP_COUNT; i++) g_pops[i].age = -1;
+}
+
+// Draw + age all live popups. Called at the end of render_shop_screen.
+static void shop_popup_drain(void) {
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    for (int i = 0; i < SHOP_POPUP_COUNT; i++) {
+        ShopPopup* p = &g_pops[i];
+        if (p->age < 0 || p->age >= SHOP_POPUP_LIFE) { p->age = -1; continue; }
+        float t = (float)p->age / (float)SHOP_POPUP_LIFE;
+        if (p->kind == 0) {
+            int slen = (int)strlen(p->text);
+            int w = pd->graphics->getTextWidth(game.fontBold, p->text, slen,
+                                                kASCIIEncoding, 0);
+            int x = p->cx - w / 2;
+            int y = p->cy - (int)(t * 24.0f);
+            pd->graphics->setDrawMode(kDrawModeFillWhite);
+            for (int ox = -1; ox <= 1; ox++)
+                for (int oy = -1; oy <= 1; oy++)
+                    pd->graphics->drawText(p->text, slen, kASCIIEncoding,
+                                           x + ox, y + oy);
+            pd->graphics->setDrawMode(kDrawModeFillBlack);
+            pd->graphics->drawText(p->text, slen, kASCIIEncoding, x, y);
+        } else {
+            // Burst — 8 spokes growing outward, thinning as they fade.
+            int r  = (int)(6 + t * 34.0f);
+            int lw = (t < 0.45f) ? 3 : 2;
+            for (int a = 0; a < 8; a++) {
+                float ang = a * (2.0f * PI_F / 8.0f) + 0.30f;
+                int x1 = p->cx + (int)(cosf(ang) * r * 0.40f);
+                int y1 = p->cy + (int)(sinf(ang) * r * 0.40f);
+                int x2 = p->cx + (int)(cosf(ang) * r);
+                int y2 = p->cy + (int)(sinf(ang) * r);
+                GFX_LINE(x1, y1, x2, y2, lw, kColorBlack);
+            }
+        }
+        p->age++;
+    }
+    pd->graphics->setDrawMode(kDrawModeCopy);
+}
+
+// ---------------------------------------------------------------------------
 // Dither patterns — 1-bit "greyscale". LCDPattern = 8 rows + 8 mask bytes.
 // ---------------------------------------------------------------------------
 static LCDPattern PAT_SKY = {        // ~5% black — faint grey sky
@@ -424,9 +520,9 @@ void render_shop_screen(void)
     render_topbar();
 
     const float SC = 1.5f;
-    static const int shopColX[3] = { 36, 92, 148 };          // 3 shop pets
-    static const int colX[5]     = { 36, 92, 148, 204, 260 }; // 5 team slots
-    static const int foodX[2]    = { 322, 366 };
+    const int* shopColX = SHOP_COL_X;       // aliases for compactness
+    const int* colX     = TEAM_COL_X;
+    const int* foodX    = FOOD_COL_X;
     int shopFeet = 110;
     int teamFeet = 182;
 
@@ -509,6 +605,19 @@ void render_shop_screen(void)
                            (SCREEN_W - hw) / 2, 220);
     pd->graphics->setDrawMode(kDrawModeCopy);
 
+    // --- Roll sweep — a quick black band rides left-to-right across the
+    //     shop pets row so the refill reads as motion, not a teleport.
+    if (game.shopRollAnim > 0) {
+        const int total = 12;
+        int t = total - (int)game.shopRollAnim;       // 0..total elapsed
+        if (t < 0) t = 0;
+        if (t > total) t = total;
+        int sweepX = -50 + (SCREEN_W * t) / total;
+        int sweepY = shopFeet - 56, sweepH = 56;
+        GFX_FILL(sweepX, sweepY, 44, sweepH, kColorBlack);
+        GFX_FILL(sweepX + 44, sweepY, 8, sweepH, (LCDColor)PAT_STONE);
+    }
+
     // --- Hover info card (only when the cursor is awake) ---
     if (game.cursorShown) {
         if (c < MAX_SHOP_PETS) {
@@ -533,6 +642,9 @@ void render_shop_screen(void)
             }
         }
     }
+
+    // --- Floating shop popups (gold deltas, level-up sparkles) ---
+    shop_popup_drain();
 
     render_debug_overlay();
 }

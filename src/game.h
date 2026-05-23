@@ -230,6 +230,7 @@ typedef struct {
     uint16_t titleBlinkTimer;
     uint16_t preBattleTimer;
     uint8_t  titleCursor;        // title-screen signpost selection (0..2)
+    uint8_t  shopRollAnim;       // countdown timer for the roll-sweep visual
 } Game;
 
 extern Game game;
@@ -255,6 +256,17 @@ void render_topbar(void);
 void render_alpine_bg(int horizonY);
 void render_shop_screen(void);
 void render_battle_screen(void);
+
+// Shop layout — exposed so shop.c can anchor popups to the right slot.
+extern const int SHOP_COL_X[3];
+extern const int TEAM_COL_X[5];
+extern const int FOOD_COL_X[2];
+
+// Shop popup buffer — short floating text & sparks fired on shop actions.
+// Pushed from shop.c, drained by render_shop_screen.
+void shop_popup_text(int cx, int cy, const char* s);
+void shop_popup_burst(int cx, int cy);
+void shop_popup_clear(void);
 void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
                  uint8_t heldFood, int cx, int baseY, float spriteScale,
                  bool selected, bool picked, bool faceLeft);

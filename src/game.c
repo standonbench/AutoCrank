@@ -180,6 +180,8 @@ void game_start_run(void)
     game.selectedTeamSlot = 0xFF;
     game.crankShiftAccum = 0;
     game.cursorShown = false;
+    game.shopRollAnim = 0;
+    shop_popup_clear();
     game.totalRuns++;
 
     shop_init_run();
@@ -260,6 +262,8 @@ void game_after_battle(void)
     } else {
         shop_end_turn_advance();
         game.cursorShown = false;
+        game.shopRollAnim = 0;
+        shop_popup_clear();
         game.state = STATE_SHOP;
     }
 }
@@ -421,6 +425,8 @@ static void shop_navigate(PDButtons pressed) {
 }
 
 static void shop_input(PDButtons pressed) {
+    if (game.shopRollAnim > 0) game.shopRollAnim--;
+
     // First-press reveal: shop opens with no visible selection so the
     // scene reads cleanly. Any d-pad press wakes the cursor at its current
     // position; A/B do nothing until then.

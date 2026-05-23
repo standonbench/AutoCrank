@@ -1,4 +1,5 @@
 #include "game.h"
+#include <stdio.h>
 
 // ---------------------------------------------------------------------------
 // Shop tier schedule: T1@T1, T2@T3, T3@T5
@@ -69,6 +70,18 @@ bool shop_try_buy_pet(uint8_t shopSlot, uint8_t teamSlot) {
     game.shop.gold -= PET_COST;
     sfx_buy();
 
+    // Cost popup at the shop slot. Level-up burst + "Ln!" at the team slot.
+    {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "-%dg", PET_COST);
+        shop_popup_text(SHOP_COL_X[shopSlot], 80, buf);
+        if (leveledUp) {
+            snprintf(buf, sizeof(buf), "L%d!", (int)dst->level);
+            shop_popup_text(TEAM_COL_X[teamSlot], 154, buf);
+            shop_popup_burst(TEAM_COL_X[teamSlot], 158);
+        }
+    }
+
     // Fire BUY trigger (Cow, Dragon care about this). data = bought pet's tier.
     const PetDef* boughtDef = pet_def(petId);
     int boughtTier = boughtDef ? boughtDef->tier : 0;
@@ -100,6 +113,11 @@ bool shop_try_buy_food(uint8_t shopSlot, uint8_t teamSlot) {
     game.shop.foods[shopSlot] = EMPTY_FOOD;
     game.shop.gold -= cost;
     sfx_buy();
+    {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "-%dg", cost);
+        shop_popup_text(FOOD_COL_X[shopSlot], 84, buf);
+    }
     return true;
 }
 
@@ -117,6 +135,11 @@ bool shop_try_sell(uint8_t teamSlot) {
     p->food = EMPTY_FOOD; p->flags = 0;
     trig_shop_drain();
     sfx_sell();
+    {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "+%dg", refund);
+        shop_popup_text(TEAM_COL_X[teamSlot], 154, buf);
+    }
     return true;
 }
 
@@ -125,6 +148,12 @@ bool shop_try_roll(void) {
     game.shop.gold -= ROLL_COST;
     shop_refill();
     sfx_roll();
+    {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "-%dg", ROLL_COST);
+        shop_popup_text(56, 180, buf);   // floats above the ROLL button
+    }
+    game.shopRollAnim = 12;
     return true;
 }
 
