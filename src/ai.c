@@ -16,6 +16,8 @@ void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed) {
     }
 
     // Difficulty curve: trivial T1-2, mild T3-4, real T5-6, hard T7-8, wall T9-10.
+    // Stat bumps softened in the late game to compensate for the smaller
+    // 3-slot shop (players see fewer pet options per roll).
     int petCount = (turn <= 2) ? 1 :
                    (turn <= 4) ? 2 :
                    (turn <= 6) ? 3 :
@@ -23,9 +25,9 @@ void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed) {
     uint8_t maxTier = (turn >= 7) ? 3 : (turn >= 4) ? 2 : 1;
     int bump = (turn <= 4) ? 0 :
                (turn <= 6) ? 1 :
-               (turn <= 8) ? 2 :
-               (turn <= 9) ? 3 : 4;
-    int lvl2Chance = (turn >= 9) ? 2 : (turn >= 7) ? 4 : 0;
+               (turn <= 8) ? 1 :
+               (turn <= 9) ? 2 : 3;
+    int lvl2Chance = (turn >= 10) ? 2 : (turn >= 8) ? 4 : 0;
     bool allowLvl3 = (turn >= 10);
 
     for (int i = 0; i < petCount; i++) {

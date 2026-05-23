@@ -1,6 +1,6 @@
 #include "game.h"
 
-#define SAVE_VERSION 1
+#define SAVE_VERSION 2     // bumped: Shop struct shrank (3 shop pets, not 5)
 
 typedef struct __attribute__((packed)) {
     uint32_t version;

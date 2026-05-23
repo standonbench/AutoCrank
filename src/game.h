@@ -35,7 +35,7 @@ extern PlaydateAPI* pd;
 // Game balance / SAP-derived numbers
 // ---------------------------------------------------------------------------
 #define TEAM_SIZE        5
-#define MAX_SHOP_PETS    5
+#define MAX_SHOP_PETS    3
 #define MAX_SHOP_FOOD    2
 #define STARTING_GOLD    10
 #define STARTING_LIVES   5
@@ -164,6 +164,7 @@ typedef struct {
     uint8_t baseHp;
     uint8_t tier;
     uint8_t spriteId;
+    const char* description;
     PetHandler handlers[NUM_TRIGGER_KINDS];
 } PetDef;
 

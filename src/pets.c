@@ -57,26 +57,26 @@ static void food_milk_apply         (Team* team, uint8_t targetSlot);
 // procedural drawer + variant (see creatures.c).
 const PetDef PETS[PET_COUNT] = {
     // Tier 1 — small alpine & young farm animals
-    [0]  = { "Marmot",    1, 2, 1,  0, { H_FAINT  pet_mouse_faint } },
-    [1]  = { "Pup",       3, 2, 1,  1, { H_SUMMON pet_dog_summon } },
-    [2]  = { "Hen",       1, 3, 1,  2, { H_EOT    pet_frog_eot } },
-    [3]  = { "Bee",       2, 1, 1,  3, { H_SOB    pet_bee_sob } },
-    [4]  = { "Hopper",    2, 2, 1,  4, { H_FAINT  pet_cricket_faint } },
-    [5]  = { "Calf",      3, 3, 1,  5, { H_BUY    pet_cow_buy } },
+    [0]  = { "Marmot",    1, 2, 1,  0, "Faint: 1 dmg to a random enemy.",          { H_FAINT  pet_mouse_faint } },
+    [1]  = { "Pup",       3, 2, 1,  1, "Ally summoned: gain +1/+1.",               { H_SUMMON pet_dog_summon } },
+    [2]  = { "Hen",       1, 3, 1,  2, "End of turn: +1/+1 to ally on left.",      { H_EOT    pet_frog_eot } },
+    [3]  = { "Bee",       2, 1, 1,  3, "Battle start: +1 atk to all friends.",     { H_SOB    pet_bee_sob } },
+    [4]  = { "Hopper",    2, 2, 1,  4, "Faint: spawn a 1/1 Hopper here.",          { H_FAINT  pet_cricket_faint } },
+    [5]  = { "Calf",      3, 3, 1,  5, "On buy: add a Milk to the shop.",          { H_BUY    pet_cow_buy } },
     // Tier 2 — working farm animals
-    [6]  = { "Sheep",     2, 2, 2,  6, { H_FAINT  pet_sheep_faint } },
-    [7]  = { "Goat",      3, 3, 2,  7, { H_FAINT  pet_hedgehog_faint } },
-    [8]  = { "Haflinger", 1, 1, 2,  8, { H_SUMMON pet_horse_summon } },
-    [9]  = { "Ox",        1, 4, 2,  9, { H_FAINTFRD pet_ox_friendfaint } },
-    [10] = { "Adder",     3, 3, 2, 10, { H_FRDATK pet_snake_friendatk } },
-    [11] = { "Goose",     2, 2, 2, 11, { H_FAINT  pet_spider_faint } },
+    [6]  = { "Sheep",     2, 2, 2,  6, "Faint: spawn two 3/3 Haflingers.",         { H_FAINT  pet_sheep_faint } },
+    [7]  = { "Goat",      3, 3, 2,  7, "Faint: 2 dmg to ALL units.",               { H_FAINT  pet_hedgehog_faint } },
+    [8]  = { "Haflinger", 1, 1, 2,  8, "Ally summoned: give it +1 atk.",           { H_SUMMON pet_horse_summon } },
+    [9]  = { "Ox",        1, 4, 2,  9, "Ally faints: gain +1 atk.",                { H_FAINTFRD pet_ox_friendfaint } },
+    [10] = { "Adder",     3, 3, 2, 10, "Ally attacks: 5 dmg to random enemy.",     { H_FRDATK pet_snake_friendatk } },
+    [11] = { "Goose",     2, 2, 2, 11, "Faint: spawn a random T1 (3/3).",          { H_FAINT  pet_spider_faint } },
     // Tier 3 — champions of the alp
-    [12] = { "Bernard",   5, 3, 3, 12, { H_SOB    pet_croc_sob } },
-    [13] = { "Highland",  3, 8, 3, 13, { H_FAINT  pet_whale_faint } },
-    [14] = { "Boar",      8, 6, 3, 14, { H_BEFOREATK pet_boar_beforeatk } },
-    [15] = { "Ibex",      3, 3, 3, 15, { H_SOB    pet_parrot_sob } },
-    [16] = { "Reine",     4, 3, 3, 16, { H_SOB    pet_tiger_sob } },
-    [17] = { "Bull",      6, 8, 3, 17, { H_BUY    pet_dragon_buy } },
+    [12] = { "Bernard",   5, 3, 3, 12, "Battle start: 8 dmg to the last enemy.",   { H_SOB    pet_croc_sob } },
+    [13] = { "Highland",  3, 8, 3, 13, "Faint: 5 dmg to a random enemy.",          { H_FAINT  pet_whale_faint } },
+    [14] = { "Boar",      8, 6, 3, 14, "Before attack: gain +2/+2.",               { H_BEFOREATK pet_boar_beforeatk } },
+    [15] = { "Ibex",      3, 3, 3, 15, "Battle start: copy left ally's ability.",  { H_SOB    pet_parrot_sob } },
+    [16] = { "Reine",     4, 3, 3, 16, "Battle start: re-fire right ally x lvl.",  { H_SOB    pet_tiger_sob } },
+    [17] = { "Bull",      6, 8, 3, 17, "Buy a T1 ally: +1/+1 to all friends.",     { H_BUY    pet_dragon_buy } },
 };
 
 // ---------------------------------------------------------------------------

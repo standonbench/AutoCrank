@@ -291,7 +291,72 @@ static void draw_button(int x, int y, int w, int h, const char* label, bool sel)
 }
 
 // ---------------------------------------------------------------------------
-// Shop screen — card-free, on the Alpine pasture.
+// Pet info card — overlay shown when the cursor is on a real pet. Anchored
+// opposite the hovered row so the row being inspected stays visible.
+// ---------------------------------------------------------------------------
+static void render_pet_info_card(uint8_t petId, int cursorColX, bool isShopHover,
+                                 int atk, int hp, int level)
+{
+    const PetDef* def = pet_def(petId);
+    if (!def) return;
+
+    int cw = 260, ch = 68;
+    int cy = isShopHover ? 126 : 22;
+    int cx = cursorColX - cw / 2;
+    if (cx < 4)                 cx = 4;
+    if (cx + cw > SCREEN_W - 4) cx = SCREEN_W - 4 - cw;
+
+    GFX_FILL(cx, cy, cw, ch, kColorWhite);
+    GFX_RECT(cx, cy, cw, ch, kColorBlack);
+    GFX_RECT(cx + 1, cy + 1, cw - 2, ch - 2, kColorBlack);
+
+    int sx = cx + 6, sy = cy + 6;
+    GFX_RECT(sx - 1, sy - 1, 34, 34, kColorBlack);
+    draw_creature(petId, sx, sy);
+
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
+    pd->graphics->drawText(def->name, strlen(def->name), kASCIIEncoding,
+                           cx + 44, cy + 4);
+
+    char stats[40];
+    if (level > 1)
+        snprintf(stats, sizeof(stats), "T%d   ATK %d   HP %d   L%d",
+                 (int)def->tier, atk, hp, level);
+    else
+        snprintf(stats, sizeof(stats), "T%d   ATK %d   HP %d",
+                 (int)def->tier, atk, hp);
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    pd->graphics->drawText(stats, strlen(stats), kASCIIEncoding,
+                           cx + 44, cy + 24);
+
+    // Ability description — wrap to a second line if it doesn't fit.
+    const char* desc = def->description ? def->description : "";
+    int maxW = cw - 12, len = (int)strlen(desc);
+    int from = 0, lineY = cy + 40, lineH = 12, drawn = 0;
+    while (from < len && drawn < 2) {
+        int to = len;
+        while (to > from) {
+            int w = pd->graphics->getTextWidth(game.fontSmall, desc + from,
+                                               to - from, kASCIIEncoding, 0);
+            if (w <= maxW) break;
+            int sp = to - 1;
+            while (sp > from && desc[sp] != ' ') sp--;
+            if (sp <= from) { to--; continue; }
+            to = sp;
+        }
+        pd->graphics->drawText(desc + from, to - from, kASCIIEncoding,
+                               cx + 6, lineY);
+        from = to;
+        while (from < len && desc[from] == ' ') from++;
+        lineY += lineH;
+        drawn++;
+    }
+    pd->graphics->setDrawMode(kDrawModeCopy);
+}
+
+// ---------------------------------------------------------------------------
+// Shop screen — three pet slots on the left, two food slots on the right.
 // ---------------------------------------------------------------------------
 void render_shop_screen(void)
 {
@@ -299,8 +364,9 @@ void render_shop_screen(void)
     render_topbar();
 
     const float SC = 1.5f;
-    static const int colX[5]  = { 36, 92, 148, 204, 260 };
-    static const int foodX[2] = { 322, 366 };
+    static const int shopColX[3] = { 36, 92, 148 };          // 3 shop pets
+    static const int colX[5]     = { 36, 92, 148, 204, 260 }; // 5 team slots
+    static const int foodX[2]    = { 322, 366 };
     int shopFeet = 110;
     int teamFeet = 182;
 
@@ -313,19 +379,19 @@ void render_shop_screen(void)
             const PetDef* d = pet_def(pid);
             if (d) { a = d->baseAtk; h = d->baseHp; }
         }
-        render_unit(pid, 0, a, h, EMPTY_FOOD, colX[i], shopFeet, SC, sel,
+        render_unit(pid, 0, a, h, EMPTY_FOOD, shopColX[i], shopFeet, SC, sel,
                     false, false);
         if (pid != EMPTY_PET) {
-            // cost tag above the creature
             int cy = shopFeet - (int)(32 * SC) - 8;
-            GFX_ELLIPSE(colX[i] - 11, cy - 7, 22, 15, kColorBlack);
+            GFX_ELLIPSE(shopColX[i] - 11, cy - 7, 22, 15, kColorBlack);
             if (game.fontBold) pd->graphics->setFont(game.fontBold);
             pd->graphics->setDrawMode(kDrawModeFillWhite);
-            pd->graphics->drawText("3g", 2, kASCIIEncoding, colX[i] - 8, cy - 8);
+            pd->graphics->drawText("3g", 2, kASCIIEncoding,
+                                   shopColX[i] - 8, cy - 8);
             pd->graphics->setDrawMode(kDrawModeCopy);
         }
         if (game.shop.frozenPets & (1 << i))
-            draw_frozen_mark(colX[i] + 18, shopFeet - (int)(32 * SC) + 2);
+            draw_frozen_mark(shopColX[i] + 18, shopFeet - (int)(32 * SC) + 2);
     }
 
     // --- Shop foods ---
@@ -378,6 +444,25 @@ void render_shop_screen(void)
     pd->graphics->drawText(hint, strlen(hint), kASCIIEncoding,
                            (SCREEN_W - hw) / 2, 220);
     pd->graphics->setDrawMode(kDrawModeCopy);
+
+    // --- Hover info card ---
+    if (c < MAX_SHOP_PETS) {
+        uint8_t pid = game.shop.pets[c];
+        if (pid != EMPTY_PET) {
+            const PetDef* d = pet_def(pid);
+            render_pet_info_card(pid, shopColX[c], true,
+                                 d ? d->baseAtk : 0, d ? d->baseHp : 0, 1);
+        }
+    } else if (c >= (MAX_SHOP_PETS + MAX_SHOP_FOOD) &&
+               c <  (MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE)) {
+        int ti = c - MAX_SHOP_PETS - MAX_SHOP_FOOD;
+        PetSlot* p = &game.player.slots[ti];
+        if (p->id != EMPTY_PET) {
+            render_pet_info_card(p->id, colX[ti], false,
+                                 (int)p->atk, (int)p->hp, (int)p->level);
+        }
+    }
+
     render_debug_overlay();
 }
 
