@@ -578,6 +578,36 @@ void render_shop_screen(void)
                     colX[i], teamFeet, SC, sel, picked, false);
     }
 
+    // --- Food targeting overlay: pulsing corner-brackets + the held food
+    //     floating above the candidate pet. Drawn after the team row so it
+    //     sits on top of the sprite.
+    if (game.pendingFoodSlot != 0xFF) {
+        int colIdx = (int)game.cursor - (MAX_SHOP_PETS + MAX_SHOP_FOOD);
+        if (colIdx >= 0 && colIdx < TEAM_SIZE) {
+            int rx = colX[colIdx];
+            int spr = (int)(32 * SC);
+            int ry = teamFeet - spr / 2;
+            int half = spr / 2 + 6;
+            int off = (int)((game.frameCount / 4) % 4);  // 0..3 pulse
+            int len = 9;
+            int x0 = rx - half + off, x1 = rx + half - off;
+            int y0 = ry - half + off, y1 = ry + half - off;
+            // four L-brackets
+            GFX_LINE(x0, y0, x0 + len, y0, 2, kColorBlack);
+            GFX_LINE(x0, y0, x0, y0 + len, 2, kColorBlack);
+            GFX_LINE(x1, y0, x1 - len, y0, 2, kColorBlack);
+            GFX_LINE(x1, y0, x1, y0 + len, 2, kColorBlack);
+            GFX_LINE(x0, y1, x0 + len, y1, 2, kColorBlack);
+            GFX_LINE(x0, y1, x0, y1 - len, 2, kColorBlack);
+            GFX_LINE(x1, y1, x1 - len, y1, 2, kColorBlack);
+            GFX_LINE(x1, y1, x1, y1 - len, 2, kColorBlack);
+            // floating food above the head, bobbing
+            int bob = (int)(2.0f * sinf((float)game.frameCount * 0.18f));
+            uint8_t fid = game.shop.foods[game.pendingFoodSlot];
+            render_food(fid, rx, ry - spr / 2 - 4 + bob, false, false);
+        }
+    }
+
     // --- Action bar ---
     int rollIdx = MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE;
     int endIdx  = rollIdx + 1;
@@ -591,6 +621,7 @@ void render_shop_screen(void)
     const char* hint = "";
     uint8_t c = game.cursor;
     if (!game.cursorShown) hint = "press d-pad to begin";
+    else if (game.pendingFoodSlot != 0xFF) hint = "A feed   B cancel";
     else if (c < MAX_SHOP_PETS) hint = "A buy   B freeze";
     else if (c < MAX_SHOP_PETS + MAX_SHOP_FOOD) hint = "A buy food   B freeze";
     else if (c < MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE)
@@ -750,11 +781,17 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
     int restX = (int)fx;
 
     // Ability KO — a faint not folded into a clash flies off on its own window.
-    if (e && e->kind == BEV_FAINT && e->side == side && e->slot == slot) {
+    bool isMyFaint = e && e->kind == BEV_FAINT && e->side == side && e->slot == slot;
+    if (isMyFaint) {
         battle_burst(restX, BATTLE_FEET - spr / 2, t);
         draw_unit_flyoff(p, side, restX, BATTLE_FEET, spr, t);
         return;
     }
+
+    // Dying-but-not-yet-fainted: a previous event killed this pet but its
+    // BEV_FAINT event hasn't animated yet. Hide so it doesn't render at 0/0
+    // (and can't catch a hurt-shake from a subsequent matching BEV_DAMAGE).
+    if (p->hp <= 0) return;
 
     int dx = 0, dy = 0;
 

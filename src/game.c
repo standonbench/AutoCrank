@@ -22,6 +22,7 @@ void game_init(void)
     memset(&game, 0, sizeof(Game));
     game.state = STATE_TITLE;
     game.selectedTeamSlot = 0xFF;
+    game.pendingFoodSlot = 0xFF;
 
     images_init();
     sound_init();
@@ -178,6 +179,7 @@ void game_start_run(void)
     game.inRun = true;
     game.cursor = 0;
     game.selectedTeamSlot = 0xFF;
+    game.pendingFoodSlot = 0xFF;
     game.crankShiftAccum = 0;
     game.cursorShown = false;
     game.shopRollAnim = 0;
@@ -272,6 +274,7 @@ void game_after_battle(void)
         shop_end_turn_advance();
         game.cursorShown = false;
         game.shopRollAnim = 0;
+        game.pendingFoodSlot = 0xFF;
         shop_popup_clear();
         game.state = STATE_SHOP;
     }
@@ -344,13 +347,29 @@ static void shop_action_a(void) {
         uint8_t shopSlot = (uint8_t)(c - CUR_SHOP_PET_END);
         uint8_t foodId = game.shop.foods[shopSlot];
         if (foodId == EMPTY_FOOD) return;
-        int dst = first_present_team_slot();
-        if (FOODS[foodId].needsTarget && dst < 0) return;
-        shop_try_buy_food(shopSlot, (uint8_t)(dst < 0 ? 0 : dst));
+        if (FOODS[foodId].needsTarget) {
+            int dst = first_present_team_slot();
+            if (dst < 0) return;                          // nothing to feed
+            if (game.shop.gold < FOODS[foodId].cost) return;
+            // Enter target-selection: snap cursor onto a team pet and let
+            // the player confirm with A (or cancel with B).
+            game.pendingFoodSlot = shopSlot;
+            game.cursor = (uint8_t)(CUR_SHOP_FOOD_END + dst);
+            game.selectedTeamSlot = 0xFF;
+            game.crankShiftAccum = 0;
+        } else {
+            shop_try_buy_food(shopSlot, 0);               // e.g. Milk
+        }
         break;
     }
     case ROW_TEAM: {
         uint8_t teamSlot = (uint8_t)(c - CUR_SHOP_FOOD_END);
+        if (game.pendingFoodSlot != 0xFF) {
+            if (game.player.slots[teamSlot].id == EMPTY_PET) break;
+            shop_try_buy_food(game.pendingFoodSlot, teamSlot);
+            game.pendingFoodSlot = 0xFF;
+            break;
+        }
         if (game.player.slots[teamSlot].id == EMPTY_PET) break;
         // Toggle pickup for crank-reorder.
         game.selectedTeamSlot = (game.selectedTeamSlot == teamSlot) ? 0xFF : teamSlot;
@@ -368,6 +387,11 @@ static void shop_action_a(void) {
 }
 
 static void shop_action_b(void) {
+    if (game.pendingFoodSlot != 0xFF) {
+        // Cancel target-selection; the food stays in the shop.
+        game.pendingFoodSlot = 0xFF;
+        return;
+    }
     uint8_t c = game.cursor;
     CursorRow r = cursor_row(c);
     if (r == ROW_SHOP_PETS) {
@@ -389,6 +413,27 @@ static void shop_action_b(void) {
 // Shop pets and shop foods render on a single visual row, so they navigate
 // as one contiguous row (cursor 0 .. CUR_SHOP_FOOD_END-1).
 static void shop_navigate(PDButtons pressed) {
+    // Food-targeting mode: cursor is locked to the team row, and left/right
+    // hop between *present* pets only (so the player can't land on a slot
+    // with nothing to feed).
+    if (game.pendingFoodSlot != 0xFF) {
+        if (pressed & kButtonLeft) {
+            for (int i = (int)game.cursor - 1; i >= CUR_SHOP_FOOD_END; i--) {
+                if (game.player.slots[i - CUR_SHOP_FOOD_END].id != EMPTY_PET) {
+                    game.cursor = (uint8_t)i; break;
+                }
+            }
+        }
+        if (pressed & kButtonRight) {
+            for (int i = (int)game.cursor + 1; i < CUR_TEAM_END; i++) {
+                if (game.player.slots[i - CUR_SHOP_FOOD_END].id != EMPTY_PET) {
+                    game.cursor = (uint8_t)i; break;
+                }
+            }
+        }
+        return;
+    }
+
     CursorRow r = cursor_row(game.cursor);
     bool inShop = (game.cursor < CUR_SHOP_FOOD_END);
 

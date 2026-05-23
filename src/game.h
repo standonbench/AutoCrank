@@ -214,6 +214,8 @@ typedef struct {
     uint8_t  selectedTeamSlot;   // 0xFF = none
     int16_t  crankShiftAccum;
     bool     cursorShown;        // hidden on shop entry; first d-pad reveals it
+    uint8_t  pendingFoodSlot;    // shop-slot of a targeted food awaiting a
+                                 // team-slot choice (0xFF = no pending pick)
 
     // battle
     BattleState battle;
