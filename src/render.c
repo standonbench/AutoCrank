@@ -230,6 +230,101 @@ void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
 // ---------------------------------------------------------------------------
 // Card-free food item — a small jar on the ground.
 // ---------------------------------------------------------------------------
+// Each food gets its own 1-bit silhouette so the shop reads at a glance.
+// Sprites sit in roughly a 22x26 box, anchored at (cx, baseY) = bottom-centre.
+static void render_food_hay(int cx, int baseY) {
+    // Trapezoidal bundle with diagonal straws and a binding band.
+    int yT = baseY - 23, yB = baseY - 4;
+    int xtl = cx - 6, xtr = cx + 6;
+    int xbl = cx - 10, xbr = cx + 10;
+    GFX_FILL(xbl, yT + 4, 21, yB - yT - 4, kColorWhite);
+    GFX_LINE(xtl, yT, xbl, yT + 4, 2, kColorBlack);
+    GFX_LINE(xtr, yT, xbr, yT + 4, 2, kColorBlack);
+    GFX_LINE(xtl, yT, xtr, yT, 2, kColorBlack);
+    GFX_LINE(xbl, yT + 4, xbl, yB, 2, kColorBlack);
+    GFX_LINE(xbr, yT + 4, xbr, yB, 2, kColorBlack);
+    GFX_LINE(xbl, yB, xbr, yB, 2, kColorBlack);
+    GFX_LINE(cx - 7, yB - 1, cx,     yT + 5, 1, kColorBlack);
+    GFX_LINE(cx - 2, yB - 1, cx + 5, yT + 5, 1, kColorBlack);
+    GFX_LINE(cx + 4, yB - 1, cx - 3, yT + 5, 1, kColorBlack);
+    GFX_FILL(xbl - 1, yT + 11, 22, 3, kColorBlack);          // binding band
+}
+
+static void render_food_edelweiss(int cx, int baseY) {
+    // 5 white round petals around a black centre + short stem.
+    int cy = baseY - 14;
+    const int px[5] = { 0,  6,  4, -4, -6 };
+    const int py[5] = {-7, -2,  5,  5, -2 };
+    GFX_LINE(cx, cy + 3, cx, baseY - 4, 2, kColorBlack);     // stem
+    for (int i = 0; i < 5; i++) {
+        int ex = cx + px[i] - 4, ey = cy + py[i] - 4;
+        GFX_ELLIPSE(ex, ey, 9, 9, kColorWhite);
+        pd->graphics->drawEllipse(ex, ey, 9, 9, 2, 0, 360, kColorBlack);
+    }
+    GFX_ELLIPSE(cx - 3, cy - 3, 7, 7, kColorBlack);          // centre
+}
+
+static void render_food_salt(int cx, int baseY) {
+    // Chunky block with dotted crystal texture.
+    int yT = baseY - 22, yB = baseY - 4;
+    int xL = cx - 10;
+    GFX_FILL(xL, yT, 20, yB - yT, kColorWhite);
+    GFX_RECT(xL, yT, 20, yB - yT, kColorBlack);
+    GFX_RECT(xL + 1, yT + 1, 18, yB - yT - 2, kColorBlack);  // double border
+    for (int dy = yT + 4; dy < yB - 2; dy += 5) {
+        for (int dx = xL + 4; dx < xL + 20 - 2; dx += 5) {
+            GFX_FILL(dx, dy, 2, 2, kColorBlack);
+        }
+    }
+}
+
+static void render_food_cowbell(int cx, int baseY) {
+    // Trapezoidal bell with a hoop handle and a clapper.
+    int yT = baseY - 23, yB = baseY - 4;
+    int xtl = cx - 4, xtr = cx + 4;
+    int xbl = cx - 10, xbr = cx + 10;
+    pd->graphics->drawEllipse(cx - 3, yT - 5, 7, 7, 2, 0, 360, kColorBlack);
+    GFX_FILL(xbl + 1, yT + 2, 19, yB - yT - 4, kColorWhite);
+    GFX_LINE(xtl, yT, xbl, yB - 2, 2, kColorBlack);
+    GFX_LINE(xtr, yT, xbr, yB - 2, 2, kColorBlack);
+    GFX_LINE(xtl, yT, xtr, yT, 2, kColorBlack);
+    GFX_FILL(xbl - 1, yB - 3, 22, 3, kColorBlack);           // lip
+    GFX_FILL(cx - 2, yB - 1, 4, 5, kColorBlack);             // clapper
+}
+
+static void render_food_cheese(int cx, int baseY) {
+    // Triangular wedge filled with scanlines, with a few holes.
+    int yT = baseY - 22, yB = baseY - 4;
+    int H = yB - yT;
+    for (int y = yT + 1; y < yB; y++) {
+        int half = ((y - yT) * 10) / H;
+        if (half > 0)
+            GFX_FILL(cx - half, y, half * 2, 1, kColorWhite);
+    }
+    GFX_LINE(cx, yT, cx - 10, yB, 2, kColorBlack);
+    GFX_LINE(cx, yT, cx + 10, yB, 2, kColorBlack);
+    GFX_LINE(cx - 10, yB, cx + 10, yB, 2, kColorBlack);
+    GFX_ELLIPSE(cx - 4, yB - 7, 4, 4, kColorBlack);
+    GFX_ELLIPSE(cx + 1, yB - 5, 3, 3, kColorBlack);
+    GFX_ELLIPSE(cx - 1, yB - 13, 3, 3, kColorBlack);
+}
+
+static void render_food_milk(int cx, int baseY) {
+    // Tall bottle with a narrow neck and a black label band.
+    int yT = baseY - 26, yB = baseY - 4;
+    int xL = cx - 7;
+    // neck
+    GFX_FILL(cx - 4, yT, 8, 5, kColorWhite);
+    GFX_RECT(cx - 4, yT, 8, 5, kColorBlack);
+    // body
+    int bodyY = yT + 5;
+    int bodyH = yB - bodyY;
+    GFX_FILL(xL, bodyY, 14, bodyH, kColorWhite);
+    GFX_RECT(xL, bodyY, 14, bodyH, kColorBlack);
+    GFX_RECT(xL + 1, bodyY + 1, 12, bodyH - 2, kColorBlack);
+    GFX_FILL(xL + 2, bodyY + 5, 10, 5, kColorBlack);          // label
+}
+
 static void render_food(uint8_t foodId, int cx, int baseY,
                         bool selected, bool frozen)
 {
@@ -242,24 +337,35 @@ static void render_food(uint8_t foodId, int cx, int baseY,
                                   (LCDColor)PAT_STONE);
         return;
     }
-    // shadow
-    GFX_ELLIPSE(cx - 11, baseY - 5, 22, 7, (LCDColor)PAT_STONE);
-    // jar: white body + black rim
-    GFX_ELLIPSE(cx - 11, baseY - 26, 22, 24, kColorWhite);
-    pd->graphics->drawEllipse(cx - 11, baseY - 26, 22, 24, 2, 0, 360,
-                              kColorBlack);
-    GFX_FILL(cx - 8, baseY - 28, 16, 5, kColorBlack);     // lid
-    // first letter as a placeholder label
-    const char* nm = FOODS[foodId].name;
-    if (nm && nm[0] && game.fontBold) {
-        char letter[2] = { nm[0], 0 };
-        pd->graphics->setFont(game.fontBold);
-        pd->graphics->setDrawMode(kDrawModeFillBlack);
-        int w = pd->graphics->getTextWidth(game.fontBold, letter, 1,
-                                           kASCIIEncoding, 0);
-        pd->graphics->drawText(letter, 1, kASCIIEncoding,
-                               cx - w / 2, baseY - 22);
-        pd->graphics->setDrawMode(kDrawModeCopy);
+    GFX_ELLIPSE(cx - 11, baseY - 5, 22, 7, (LCDColor)PAT_STONE);   // shadow
+
+    switch (foodId) {
+        case 0: render_food_hay(cx, baseY);       break;
+        case 1: render_food_edelweiss(cx, baseY); break;
+        case 2: render_food_salt(cx, baseY);      break;
+        case 3: render_food_cowbell(cx, baseY);   break;
+        case 4: render_food_cheese(cx, baseY);    break;
+        case 5: render_food_milk(cx, baseY);      break;
+        default: {
+            // Fallback: jar + first letter (so a new food without art is
+            // still visible until its sprite is wired).
+            GFX_ELLIPSE(cx - 11, baseY - 26, 22, 24, kColorWhite);
+            pd->graphics->drawEllipse(cx - 11, baseY - 26, 22, 24, 2, 0, 360,
+                                      kColorBlack);
+            GFX_FILL(cx - 8, baseY - 28, 16, 5, kColorBlack);
+            const char* nm = FOODS[foodId].name;
+            if (nm && nm[0] && game.fontBold) {
+                char letter[2] = { nm[0], 0 };
+                pd->graphics->setFont(game.fontBold);
+                pd->graphics->setDrawMode(kDrawModeFillBlack);
+                int w = pd->graphics->getTextWidth(game.fontBold, letter, 1,
+                                                   kASCIIEncoding, 0);
+                pd->graphics->drawText(letter, 1, kASCIIEncoding,
+                                       cx - w / 2, baseY - 22);
+                pd->graphics->setDrawMode(kDrawModeCopy);
+            }
+            break;
+        }
     }
     if (frozen) {
         GFX_ELLIPSE(cx + 6, baseY - 30, 8, 8, kColorWhite);
