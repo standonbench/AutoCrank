@@ -241,6 +241,15 @@ void game_after_battle(void)
         game.wins++;
         if (game.wins > game.bestStreak) game.bestStreak = game.wins;
         game.totalWins++;
+        // Roster achievement: tick "wins at L3" for each max-level pet that
+        // was on the team for this victory. Saturate at 255.
+        for (int i = 0; i < TEAM_SIZE; i++) {
+            PetSlot* p = &game.player.slots[i];
+            if (p->id < PET_COUNT && p->level >= MAX_PET_LEVEL &&
+                game.petWinsAtMax[p->id] < 255) {
+                game.petWinsAtMax[p->id]++;
+            }
+        }
     } else if (game.battleResult == 1) {
         // Loss
         if (game.lives > 0) game.lives--;

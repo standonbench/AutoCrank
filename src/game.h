@@ -197,6 +197,8 @@ typedef struct {
     uint32_t totalWins;
     uint32_t bestStreak;
     uint8_t  unlockedPets[4];
+    uint8_t  petMaxLevel[PET_COUNT];   // highest level ever reached, per pet
+    uint8_t  petWinsAtMax[PET_COUNT];  // battles won while pet was at L3
 
     // current run
     bool     inRun;

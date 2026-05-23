@@ -61,6 +61,9 @@ bool shop_try_buy_pet(uint8_t shopSlot, uint8_t teamSlot) {
             dst->atk = (int16_t)mini(dst->atk + 1, STAT_CAP);
             dst->hp  = (int16_t)mini(dst->hp + 1, STAT_CAP);
             leveledUp = true;
+            // Track lifetime max-level for the roster badge.
+            if (dst->level > game.petMaxLevel[petId])
+                game.petMaxLevel[petId] = dst->level;
         }
     } else {
         return false;

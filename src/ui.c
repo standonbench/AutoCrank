@@ -25,8 +25,26 @@ void ui_title_update(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Roster gallery — all 18 creatures in a grid (debug / art review)
+// Roster gallery — all 18 creatures in a grid + achievement badges.
+// A pet earns the outline badge when first taken to L3; the badge fills
+// in once a battle has been won with that pet on the team at L3.
 // ---------------------------------------------------------------------------
+static void draw_roster_badge(int cx, int cy, bool earned) {
+    // White chip with a black ring; inner mark shows the progress tier.
+    GFX_ELLIPSE(cx - 4, cy - 4, 9, 9, kColorWhite);
+    pd->graphics->drawEllipse(cx - 4, cy - 4, 9, 9, 1, 0, 360, kColorBlack);
+    if (earned) {
+        // Filled diamond — L3 + at least one win
+        pd->graphics->fillTriangle(cx, cy - 3, cx + 3, cy,
+                                   cx, cy + 3, kColorBlack);
+        pd->graphics->fillTriangle(cx, cy - 3, cx, cy + 3,
+                                   cx - 3, cy, kColorBlack);
+    } else {
+        // Small dot — reached L3 but no win yet
+        GFX_ELLIPSE(cx - 1, cy - 1, 3, 3, kColorBlack);
+    }
+}
+
 void ui_gallery_render(void) {
     GFX_FILL(0, 0, SCREEN_W, SCREEN_H, kColorWhite);
     GFX_FILL(0, 0, SCREEN_W, 18, kColorBlack);
@@ -50,6 +68,13 @@ void ui_gallery_render(void) {
                                            kASCIIEncoding, 0);
         pd->graphics->drawText(nm, strlen(nm), kASCIIEncoding,
                                cx + (60 - w) / 2, cy + 54);
+
+        // Achievement badge top-right.
+        if (game.petWinsAtMax[i] >= 1) {
+            draw_roster_badge(cx + 51, cy + 6, true);
+        } else if (game.petMaxLevel[i] >= MAX_PET_LEVEL) {
+            draw_roster_badge(cx + 51, cy + 6, false);
+        }
     }
     if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
     pd->graphics->drawText("B: back", 7, kASCIIEncoding, 8, SCREEN_H - 13);

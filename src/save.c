@@ -1,6 +1,6 @@
 #include "game.h"
 
-#define SAVE_VERSION 2     // bumped: Shop struct shrank (3 shop pets, not 5)
+#define SAVE_VERSION 3     // bumped: + per-pet stats (max-level / wins-at-max)
 
 typedef struct __attribute__((packed)) {
     uint32_t version;
@@ -8,6 +8,8 @@ typedef struct __attribute__((packed)) {
     uint32_t totalWins;
     uint32_t bestStreak;
     uint8_t  unlockedPets[4];
+    uint8_t  petMaxLevel[PET_COUNT];
+    uint8_t  petWinsAtMax[PET_COUNT];
     // run resume state
     uint8_t  inRun;
     uint8_t  turn;
@@ -23,6 +25,8 @@ static void save_set_defaults(void) {
     game.totalWins = 0;
     game.bestStreak = 0;
     memset(game.unlockedPets, 0, sizeof(game.unlockedPets));
+    memset(game.petMaxLevel, 0, sizeof(game.petMaxLevel));
+    memset(game.petWinsAtMax, 0, sizeof(game.petWinsAtMax));
     // Mark first 6 (Tier 1) pets as unlocked by default
     game.unlockedPets[0] = 0x3F;
     game.inRun = false;
@@ -48,6 +52,8 @@ void save_load(void) {
             game.totalWins = d.totalWins;
             game.bestStreak = d.bestStreak;
             memcpy(game.unlockedPets, d.unlockedPets, sizeof(d.unlockedPets));
+            memcpy(game.petMaxLevel,  d.petMaxLevel,  sizeof(d.petMaxLevel));
+            memcpy(game.petWinsAtMax, d.petWinsAtMax, sizeof(d.petWinsAtMax));
             game.inRun = d.inRun != 0;
             game.turn = d.turn;
             game.wins = d.wins;
@@ -72,6 +78,8 @@ void save_write(void) {
     d.totalWins = game.totalWins;
     d.bestStreak = game.bestStreak;
     memcpy(d.unlockedPets, game.unlockedPets, sizeof(d.unlockedPets));
+    memcpy(d.petMaxLevel,  game.petMaxLevel,  sizeof(d.petMaxLevel));
+    memcpy(d.petWinsAtMax, game.petWinsAtMax, sizeof(d.petWinsAtMax));
     d.inRun = game.inRun ? 1 : 0;
     d.turn = game.turn;
     d.wins = game.wins;
