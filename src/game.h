@@ -290,6 +290,10 @@ void battle_log_push(BattleEventKind kind, uint8_t side, uint8_t slot, int16_t v
 void battle_emit(BattleState* bs, BattleEventKind kind, uint8_t side, uint8_t slot, int16_t value, uint8_t data);
 int  battle_event_duration(uint8_t kind);
 int  battle_event_window(int playhead);
+// Drains all pending FAINTs through the trigger system, cascading. Returns
+// true if any pet fainted. Used by battle sim AND by shop-context food
+// triggers (Sleeping Pill) so synergies fire identically.
+bool battle_resolve_faints(BattleState* bs);
 
 // ai.c
 void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed);

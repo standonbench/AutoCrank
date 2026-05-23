@@ -133,7 +133,7 @@ static bool any_alive(Team* t) { return frontmost_alive(t) >= 0; }
 // AFTER the trigger drain, we emit the BEV_FAINT events — which clear the
 // slot via apply_event. If a handler replaced the pet in-slot (Cricket spawn),
 // the slot is NOT cleared.
-static bool resolve_faints(BattleState* bs)
+bool battle_resolve_faints(BattleState* bs)
 {
     bool anyEver = false;
     int safety = 20;
@@ -159,11 +159,19 @@ static bool resolve_faints(BattleState* bs)
         trig_drain(bs);
         // Emit FAINT events (apply_event clears the slot) unless the handler
         // already replaced the pet (Cricket → Zombie Cricket spawn).
+        // If the dying pet held Edelweiss (food id 1), a 1/1 Bee Buddy
+        // hatches into the freshly-vacated slot.
         for (int side = 0; side < 2; side++) {
             for (int s = 0; s < TEAM_SIZE; s++) {
                 PetSlot* p = &bs->teams[side].slots[s];
                 if (dead[side][s] != EMPTY_PET && p->id == dead[side][s]) {
+                    bool hadHoney = (p->food == 1);
                     battle_emit(bs, BEV_FAINT, (uint8_t)side, (uint8_t)s, 0, dead[side][s]);
+                    if (hadHoney) {
+                        int16_t bp = (int16_t)(1 | (1 << 8));      // 1 atk / 1 hp
+                        battle_emit(bs, BEV_SPAWN, (uint8_t)side, (uint8_t)s,
+                                    bp, 3 /* Bee id */);
+                    }
                 }
             }
         }
@@ -189,7 +197,7 @@ void battle_simulate(void) {
     // pet on both sides, each firing its own handler exactly once.
     trig_push(TRIG_START_OF_BATTLE, 0, 0, 0, 0);
     trig_drain(bs);
-    resolve_faints(bs);
+    battle_resolve_faints(bs);
 
     // Combat loop
     int safety = 100;
@@ -225,7 +233,7 @@ void battle_simulate(void) {
         trig_push(TRIG_FRIEND_ATTACK, 0, (uint8_t)p, (uint8_t)e, pAtk);
         trig_push(TRIG_FRIEND_ATTACK, 1, (uint8_t)e, (uint8_t)p, eAtk);
         trig_drain(bs);
-        resolve_faints(bs);
+        battle_resolve_faints(bs);
     }
 
     // Determine result

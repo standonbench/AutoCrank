@@ -196,6 +196,13 @@ void game_advance_to_battle(void)
     game.battle.teams[0] = game.player;
     game.battle.inBattle = true;
 
+    // Salt Lick: +5 atk for the battle copy only (player team unchanged).
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        PetSlot* p = &game.battle.teams[0].slots[i];
+        if (p->id != EMPTY_PET && (p->flags & 0x02))
+            p->atk = (int16_t)mini(p->atk + 5, STAT_CAP);
+    }
+
     battle_simulate();              // populates battleLog (mutates teams[])
     game.battlePlayhead = 0;
     game.battleClock = 0.0f;
@@ -213,6 +220,17 @@ void game_advance_to_battle(void)
 void game_after_battle(void)
 {
     game.battle.inBattle = false;
+
+    // Salt Lick is one-battle-only — clear the flag and consume the food
+    // slot so the +5 atk doesn't carry over. Cowbell (garlic, bit 0) stays.
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        PetSlot* p = &game.player.slots[i];
+        if (p->id == EMPTY_PET) continue;
+        if (p->flags & 0x02) {
+            p->flags &= (uint8_t)~0x02;
+            if (p->food == 2) p->food = EMPTY_FOOD;
+        }
+    }
 
     // Apply outcome
     if (game.battleResult == 0) {

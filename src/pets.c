@@ -407,8 +407,8 @@ static void food_meatbone_apply(Team* team, uint8_t targetSlot) {
     if (targetSlot >= TEAM_SIZE) return;
     PetSlot* p = &team->slots[targetSlot];
     if (p->id == EMPTY_PET) return;
-    p->food = 2;  // Held: +5 atk in next battle (apply at start of battle later)
-    p->atk = (int16_t)mini(p->atk + 5, STAT_CAP);  // crude v0: apply permanently
+    p->food = 2;            // Salt Lick: +5 atk next battle (battle-only)
+    p->flags |= 0x02;       // applied at battle start, cleared after
 }
 
 static void food_garlic_apply(Team* team, uint8_t targetSlot) {
@@ -420,18 +420,40 @@ static void food_garlic_apply(Team* team, uint8_t targetSlot) {
 }
 
 static void food_sleepingpill_apply(Team* team, uint8_t targetSlot) {
-    // Immediately faints the pet (synergy enabler — fires shop-context FAINT)
+    // Immediately faints the pet, routing through the same cascade pipeline
+    // the battle sim uses — so Sheep spawns its rams, Hopper its zombie,
+    // Goose its random T1, Ox/Adder get their friend-faints triggers, etc.
     if (targetSlot >= TEAM_SIZE) return;
     PetSlot* p = &team->slots[targetSlot];
     if (p->id == EMPTY_PET) return;
-    // For v0 simplicity: just clear the slot (no shop-faint dispatch yet)
-    p->id = EMPTY_PET;
-    p->level = 1;
-    p->xp = 0;
-    p->atk = 0;
-    p->hp = 0;
-    p->food = EMPTY_FOOD;
-    p->flags = 0;
+
+    BattleState* bs = &game.battle;
+    bool wasInBattle = bs->inBattle;
+    Team savedP = bs->teams[0], savedE = bs->teams[1];
+
+    // Stage the player team on side 0, leave the enemy side empty so
+    // outward-targeting handlers (Marmot, Highland, Snake) find no targets
+    // and silently no-op. battle_emit applies state but skips logging while
+    // inBattle == false.
+    bs->inBattle = false;
+    bs->teams[0] = *team;
+    memset(&bs->teams[1], 0, sizeof(Team));
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        bs->teams[1].slots[i].id = EMPTY_PET;
+        bs->teams[1].slots[i].food = EMPTY_FOOD;
+    }
+
+    // Knock the target's HP to 0 so battle_resolve_faints catches it.
+    bs->teams[0].slots[targetSlot].hp = 0;
+
+    trig_reset();
+    battle_resolve_faints(bs);
+
+    *team = bs->teams[0];
+
+    bs->teams[0] = savedP;
+    bs->teams[1] = savedE;
+    bs->inBattle = wasInBattle;
 }
 
 static void food_milk_apply(Team* team, uint8_t targetSlot) {
