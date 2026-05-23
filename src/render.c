@@ -355,6 +355,66 @@ static void render_pet_info_card(uint8_t petId, int cursorColX, bool isShopHover
     pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
+// Same plate as the pet card, retooled for foods — jar mini-icon, name,
+// cost, one-line description.
+static void render_food_info_card(uint8_t foodId, int cursorColX)
+{
+    if (foodId >= FOOD_COUNT) return;
+    const FoodDef* d = &FOODS[foodId];
+
+    int cw = 260, ch = 68;
+    int cy = 126;                                   // overlay the team row
+    int cx = cursorColX - cw / 2;
+    if (cx < 4)                 cx = 4;
+    if (cx + cw > SCREEN_W - 4) cx = SCREEN_W - 4 - cw;
+
+    GFX_FILL(cx, cy, cw, ch, kColorWhite);
+    GFX_RECT(cx, cy, cw, ch, kColorBlack);
+    GFX_RECT(cx + 1, cy + 1, cw - 2, ch - 2, kColorBlack);
+
+    // Mini jar in the sprite cell.
+    int sx = cx + 6, sy = cy + 6;
+    GFX_RECT(sx - 1, sy - 1, 34, 34, kColorBlack);
+    render_food(foodId, sx + 16, sy + 32, false, false);
+
+    // Name (fontBold).
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
+    pd->graphics->drawText(d->name, strlen(d->name), kASCIIEncoding,
+                           cx + 44, cy + 4);
+
+    // Cost line.
+    char costBuf[16];
+    snprintf(costBuf, sizeof(costBuf), "Cost: %dg", (int)d->cost);
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    pd->graphics->drawText(costBuf, strlen(costBuf), kASCIIEncoding,
+                           cx + 44, cy + 24);
+
+    // Description — wraps to a second line if needed (same logic as pets).
+    const char* desc = d->description ? d->description : "";
+    int maxW = cw - 12, len = (int)strlen(desc);
+    int from = 0, lineY = cy + 40, lineH = 12, drawn = 0;
+    while (from < len && drawn < 2) {
+        int to = len;
+        while (to > from) {
+            int w = pd->graphics->getTextWidth(game.fontSmall, desc + from,
+                                               to - from, kASCIIEncoding, 0);
+            if (w <= maxW) break;
+            int sp = to - 1;
+            while (sp > from && desc[sp] != ' ') sp--;
+            if (sp <= from) { to--; continue; }
+            to = sp;
+        }
+        pd->graphics->drawText(desc + from, to - from, kASCIIEncoding,
+                               cx + 6, lineY);
+        from = to;
+        while (from < len && desc[from] == ' ') from++;
+        lineY += lineH;
+        drawn++;
+    }
+    pd->graphics->setDrawMode(kDrawModeCopy);
+}
+
 // ---------------------------------------------------------------------------
 // Shop screen — three pet slots on the left, two food slots on the right.
 // ---------------------------------------------------------------------------
@@ -372,7 +432,7 @@ void render_shop_screen(void)
 
     // --- Shop pets ---
     for (int i = 0; i < MAX_SHOP_PETS; i++) {
-        bool sel = (game.cursor == i);
+        bool sel = game.cursorShown && (game.cursor == i);
         uint8_t pid = game.shop.pets[i];
         int16_t a = 0, h = 0;
         if (pid != EMPTY_PET) {
@@ -396,7 +456,7 @@ void render_shop_screen(void)
 
     // --- Shop foods ---
     for (int i = 0; i < MAX_SHOP_FOOD; i++) {
-        bool sel = (game.cursor == MAX_SHOP_PETS + i);
+        bool sel = game.cursorShown && (game.cursor == MAX_SHOP_PETS + i);
         bool frz = (game.shop.frozenFoods & (1 << i)) != 0;
         render_food(game.shop.foods[i], foodX[i], shopFeet, sel, frz);
         if (game.shop.foods[i] != EMPTY_FOOD) {
@@ -414,7 +474,8 @@ void render_shop_screen(void)
 
     // --- Team row ---
     for (int i = 0; i < TEAM_SIZE; i++) {
-        bool sel = (game.cursor == MAX_SHOP_PETS + MAX_SHOP_FOOD + i);
+        bool sel = game.cursorShown &&
+                   (game.cursor == MAX_SHOP_PETS + MAX_SHOP_FOOD + i);
         bool picked = (game.selectedTeamSlot == i);
         PetSlot* p = &game.player.slots[i];
         render_unit(p->id, p->level, p->atk, p->hp, p->food,
@@ -425,13 +486,16 @@ void render_shop_screen(void)
     int rollIdx = MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE;
     int endIdx  = rollIdx + 1;
     int ay = 196;
-    draw_button(8,   ay, 96, 24, "ROLL 1g",  game.cursor == rollIdx);
-    draw_button(296, ay, 96, 24, "END TURN", game.cursor == endIdx);
+    draw_button(8,   ay, 96, 24, "ROLL 1g",
+                game.cursorShown && game.cursor == rollIdx);
+    draw_button(296, ay, 96, 24, "END TURN",
+                game.cursorShown && game.cursor == endIdx);
 
     // --- Hint strip ---
     const char* hint = "";
     uint8_t c = game.cursor;
-    if (c < MAX_SHOP_PETS) hint = "A buy   B freeze";
+    if (!game.cursorShown) hint = "press d-pad to begin";
+    else if (c < MAX_SHOP_PETS) hint = "A buy   B freeze";
     else if (c < MAX_SHOP_PETS + MAX_SHOP_FOOD) hint = "A buy food   B freeze";
     else if (c < MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE)
         hint = "A grab (crank to move)   B sell";
@@ -445,21 +509,28 @@ void render_shop_screen(void)
                            (SCREEN_W - hw) / 2, 220);
     pd->graphics->setDrawMode(kDrawModeCopy);
 
-    // --- Hover info card ---
-    if (c < MAX_SHOP_PETS) {
-        uint8_t pid = game.shop.pets[c];
-        if (pid != EMPTY_PET) {
-            const PetDef* d = pet_def(pid);
-            render_pet_info_card(pid, shopColX[c], true,
-                                 d ? d->baseAtk : 0, d ? d->baseHp : 0, 1);
-        }
-    } else if (c >= (MAX_SHOP_PETS + MAX_SHOP_FOOD) &&
-               c <  (MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE)) {
-        int ti = c - MAX_SHOP_PETS - MAX_SHOP_FOOD;
-        PetSlot* p = &game.player.slots[ti];
-        if (p->id != EMPTY_PET) {
-            render_pet_info_card(p->id, colX[ti], false,
-                                 (int)p->atk, (int)p->hp, (int)p->level);
+    // --- Hover info card (only when the cursor is awake) ---
+    if (game.cursorShown) {
+        if (c < MAX_SHOP_PETS) {
+            uint8_t pid = game.shop.pets[c];
+            if (pid != EMPTY_PET) {
+                const PetDef* d = pet_def(pid);
+                render_pet_info_card(pid, shopColX[c], true,
+                                     d ? d->baseAtk : 0, d ? d->baseHp : 0, 1);
+            }
+        } else if (c < MAX_SHOP_PETS + MAX_SHOP_FOOD) {
+            int fi = c - MAX_SHOP_PETS;
+            uint8_t fid = game.shop.foods[fi];
+            if (fid != EMPTY_FOOD)
+                render_food_info_card(fid, foodX[fi]);
+        } else if (c >= (MAX_SHOP_PETS + MAX_SHOP_FOOD) &&
+                   c <  (MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE)) {
+            int ti = c - MAX_SHOP_PETS - MAX_SHOP_FOOD;
+            PetSlot* p = &game.player.slots[ti];
+            if (p->id != EMPTY_PET) {
+                render_pet_info_card(p->id, colX[ti], false,
+                                     (int)p->atk, (int)p->hp, (int)p->level);
+            }
         }
     }
 

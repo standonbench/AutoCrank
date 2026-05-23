@@ -179,6 +179,7 @@ void game_start_run(void)
     game.cursor = 0;
     game.selectedTeamSlot = 0xFF;
     game.crankShiftAccum = 0;
+    game.cursorShown = false;
     game.totalRuns++;
 
     shop_init_run();
@@ -258,6 +259,7 @@ void game_after_battle(void)
         sfx_lose();
     } else {
         shop_end_turn_advance();
+        game.cursorShown = false;
         game.state = STATE_SHOP;
     }
 }
@@ -419,6 +421,14 @@ static void shop_navigate(PDButtons pressed) {
 }
 
 static void shop_input(PDButtons pressed) {
+    // First-press reveal: shop opens with no visible selection so the
+    // scene reads cleanly. Any d-pad press wakes the cursor at its current
+    // position; A/B do nothing until then.
+    PDButtons dpad = kButtonLeft | kButtonRight | kButtonUp | kButtonDown;
+    if (!game.cursorShown) {
+        if (pressed & dpad) game.cursorShown = true;
+        return;
+    }
     shop_navigate(pressed);
     if (pressed & kButtonA) shop_action_a();
     if (pressed & kButtonB) shop_action_b();

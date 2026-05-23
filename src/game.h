@@ -177,6 +177,7 @@ typedef struct {
     uint8_t cost;
     uint8_t spriteId;
     bool needsTarget;
+    const char* description;
     FoodApply apply;
 } FoodDef;
 
@@ -210,6 +211,7 @@ typedef struct {
     uint8_t  cursor;             // index into shop+team flat selection
     uint8_t  selectedTeamSlot;   // 0xFF = none
     int16_t  crankShiftAccum;
+    bool     cursorShown;        // hidden on shop entry; first d-pad reveals it
 
     // battle
     BattleState battle;

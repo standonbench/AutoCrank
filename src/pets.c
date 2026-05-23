@@ -112,12 +112,12 @@ uint8_t pet_random_in_tier(uint8_t maxTier) {
 // ---------------------------------------------------------------------------
 const FoodDef FOODS[FOOD_COUNT] = {
     // Alpine reskin — same mechanics, Swiss-pasture flavour.
-    [0] = { "Hay",       3, 0, true,  food_apple_apply },        // +1/+1
-    [1] = { "Edelweiss", 3, 1, true,  food_honey_apply },        // faint -> Bee Buddy
-    [2] = { "Salt Lick", 3, 2, true,  food_meatbone_apply },     // +5 atk this battle
-    [3] = { "Cowbell",   3, 3, true,  food_garlic_apply },       // -2 damage taken
-    [4] = { "Cheese",    1, 4, true,  food_sleepingpill_apply }, // faint immediately
-    [5] = { "Milk",      3, 5, false, food_milk_apply },         // random T1 ally +2/+2
+    [0] = { "Hay",       3, 0, true,  "+1 atk and +1 hp to a friend.",        food_apple_apply },
+    [1] = { "Edelweiss", 3, 1, true,  "Held: on faint, spawn a 1/1 Bee.",     food_honey_apply },
+    [2] = { "Salt Lick", 3, 2, true,  "+5 atk for the next battle.",          food_meatbone_apply },
+    [3] = { "Cowbell",   3, 3, true,  "Held: takes 2 less damage.",           food_garlic_apply },
+    [4] = { "Cheese",    1, 4, true,  "Faint a friend (synergies fire).",     food_sleepingpill_apply },
+    [5] = { "Milk",      3, 5, false, "Random friend gains +2/+2.",           food_milk_apply },
 };
 
 // ---------------------------------------------------------------------------
@@ -223,13 +223,22 @@ static void pet_cow_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerEven
     // Fires only when WE were bought
     if (ev->side != side || ev->srcSlot != slot) return;
     (void)bs;
-    // Add Milk to the first empty food slot (shop trigger)
+    // The card promises Milk — deliver it. Prefer an empty slot, else
+    // overwrite the leftmost unfrozen slot so the gift always lands.
     for (int i = 0; i < MAX_SHOP_FOOD; i++) {
         if (game.shop.foods[i] == EMPTY_FOOD) {
             game.shop.foods[i] = 5;  // Milk
-            break;
+            return;
         }
     }
+    for (int i = 0; i < MAX_SHOP_FOOD; i++) {
+        if (!(game.shop.frozenFoods & (1 << i))) {
+            game.shop.foods[i] = 5;
+            return;
+        }
+    }
+    // All slots frozen — let Milk replace slot 0 anyway, this corner case is rare.
+    game.shop.foods[0] = 5;
 }
 
 // ---------------------------------------------------------------------------
