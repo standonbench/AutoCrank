@@ -391,7 +391,7 @@ void render_shop_screen(void)
 static BattleEvent* battle_cur_event(float* tOut) {
     if (game.battlePlayhead >= game.battleLogLen) { *tOut = 0; return NULL; }
     BattleEvent* e = &game.battleLog[game.battlePlayhead];
-    float dur = (float)battle_event_duration(e->kind);
+    float dur = (float)battle_event_window(game.battlePlayhead);
     float t = dur > 0 ? game.battleClock / dur : 1.0f;
     if (t < 0) t = 0;
     if (t > 1) t = 1;
@@ -430,86 +430,93 @@ static void battle_popup(int cx, int topY, const char* s, float t) {
     pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
+// Will the unit at side/slot be KO'd by the clash logged at `clashIdx`?
+// Used by the clash animation to fold the loser's fly-off into the same
+// window — so a lethal hit launches them off-screen the instant of contact.
+static bool clash_kills(int clashIdx, int side, int slot) {
+    for (int i = clashIdx + 1; i < game.battleLogLen; i++) {
+        BattleEvent* e = &game.battleLog[i];
+        if (e->kind == BEV_CLASH || e->kind == BEV_ATTACK) break;
+        if (e->kind == BEV_FAINT && e->side == side && e->slot == slot)
+            return true;
+    }
+    return false;
+}
+
+// A radial spark-burst at (cx,cy); k = 0..1 progress, fades out by ~0.5.
+static void battle_burst(int cx, int cy, float k) {
+    if (k < 0.0f || k >= 0.5f) return;
+    int r = (int)(9 + k * 80.0f);
+    for (int a = 0; a < 9; a++) {
+        float ang = a * (2.0f * PI_F / 9.0f) + 0.30f;
+        GFX_LINE(cx + (int)(cosf(ang) * r * 0.34f),
+                 cy + (int)(sinf(ang) * r * 0.34f),
+                 cx + (int)(cosf(ang) * r),
+                 cy + (int)(sinf(ang) * r), 3, kColorBlack);
+    }
+}
+
+// KO launch — fling the unit off-screen with a hard spin and a scale punch.
+// Ease-out so it bolts at the moment of impact instead of easing in.
+static void draw_unit_flyoff(PetSlot* p, int side, int cx0, int feetY,
+                             int spr, float flyT) {
+    if (flyT < 0.0f) flyT = 0.0f;
+    if (flyT > 1.0f) flyT = 1.0f;
+    float eo = 1.0f - (1.0f - flyT) * (1.0f - flyT);
+    int backDir = (side == 0) ? -1 : 1;
+    int cxK = cx0 + backDir * (int)(eo * 540.0f);
+    int cyK = (feetY - spr / 2) - (int)(sinf(flyT * PI_F) * 150.0f)
+                                + (int)(eo * 60.0f);
+    float deg = eo * 820.0f * (float)backDir;
+    float sc  = BATTLE_SCALE *
+                (1.0f + 0.45f * (1.0f - flyT) * (1.0f - flyT) - 0.32f * flyT);
+    draw_creature_xform(p->id, cxK, cyK, sc, deg, side == 1);
+}
+
 // Draw a single battle unit with clash / faint / hit animation.
 static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float fx) {
     PetSlot* p = &game.battle.teams[side].slots[slot];
     if (p->id == EMPTY_PET) return;
 
-    int spr = (int)(32 * BATTLE_SCALE);
-    int dx = 0, dy = 0;
-    bool fainting = false;
-    float fT = 0.0f;
+    int spr   = (int)(32 * BATTLE_SCALE);
+    int restX = (int)fx;
 
-    if (e) {
-        if (e->kind == BEV_CLASH) {
-            // Rush in fast, strike near centre at t~0.42, recoil, settle.
-            if ((side == 0 && slot == e->slot) ||
-                (side == 1 && slot == e->data)) {
-                const float peak = 26.0f, contactT = 0.42f;
-                float lunge;
-                if (t < contactT) {
-                    float a = t / contactT;
-                    lunge = peak * a * a;                       // accelerate in
-                } else {
-                    float r = (t - contactT) / (1.0f - contactT);
-                    lunge = peak * (1.0f - r)
-                          - 7.0f * sinf(r * PI_F);              // recoil bounce
-                }
-                dx = (side == 0) ? (int)lunge : -(int)lunge;
-            }
-        } else if (e->kind == BEV_FAINT && e->side == side && e->slot == slot) {
-            fainting = true; fT = t;
-        } else if (e->kind == BEV_DAMAGE && e->side == side && e->slot == slot) {
-            dx = (int)(sinf(t * 38.0f) * 3.0f);                // quick hurt-shake
-        } else if ((e->kind == BEV_BUFF || e->kind == BEV_ABILITY) &&
-                   e->side == side && e->slot == slot) {
-            dy = -(int)(sinf(t * PI_F) * 5.0f);
-        }
-    }
-
-    int ux = (int)fx + dx;
-    int uy = BATTLE_FEET + dy;
-
-    if (fainting) {
-        if (fT < 0.22f) {
-            // Stagger phase: unit reels in place while a burst radiates out.
-            float st = fT / 0.22f;
-            float shake = sinf(st * PI_F * 5.0f) * 6.0f * (1.0f - st * 0.6f);
-            int sx = ux + (int)(shake * (side == 0 ? 1.0f : -1.0f));
-            int ix = ux, iy = uy - spr / 2;
-            // 10-spoke burst + expanding ring
-            float burstK = st;
-            if (burstK < 0.75f) {
-                int r = (int)(4 + burstK * 46.0f);
-                for (int a = 0; a < 10; a++) {
-                    float ang = a * (PI_F / 5.0f) + 0.31f;
-                    GFX_LINE(ix + (int)(cosf(ang) * r * 0.30f),
-                             iy + (int)(sinf(ang) * r * 0.30f),
-                             ix + (int)(cosf(ang) * r),
-                             iy + (int)(sinf(ang) * r), 2, kColorBlack);
-                }
-                int rr = (int)(6 + burstK * 28.0f);
-                pd->graphics->drawEllipse(ix - rr, iy - rr, rr * 2, rr * 2,
-                                          2, 0, 360, kColorBlack);
-            }
-            render_unit(p->id, p->level, p->atk, p->hp, p->food,
-                        sx, uy, BATTLE_SCALE, false, false, side == 1);
-        } else {
-            // Fly-off phase: accelerating arc off-screen with spin and scale punch.
-            float flyT = (fT - 0.22f) / 0.78f;
-            float k    = flyT * flyT;
-            int backDir = (side == 0) ? -1 : 1;
-            int cxK = ux + backDir * (int)(k * 480.0f);
-            int cyK = uy - spr / 2 + (int)(flyT * -340.0f + k * 300.0f);
-            float deg = flyT * 720.0f * (float)backDir;
-            float sc  = BATTLE_SCALE * (1.0f + 0.25f * (1.0f - flyT) * flyT * 4.0f);
-            draw_creature_xform(p->id, cxK, cyK, sc, deg, side == 1);
-        }
+    // Ability KO — a faint not folded into a clash flies off on its own window.
+    if (e && e->kind == BEV_FAINT && e->side == side && e->slot == slot) {
+        battle_burst(restX, BATTLE_FEET - spr / 2, t);
+        draw_unit_flyoff(p, side, restX, BATTLE_FEET, spr, t);
         return;
     }
 
-    render_unit(p->id, p->level, p->atk, p->hp, p->food, ux, uy,
-                BATTLE_SCALE, false, false, side == 1);
+    int dx = 0, dy = 0;
+
+    if (e && e->kind == BEV_CLASH &&
+        ((side == 0 && slot == e->slot) || (side == 1 && slot == e->data))) {
+        const float peak = 26.0f, contactT = 0.42f;
+        int dir = (side == 0) ? 1 : -1;            // lunge toward centre
+        if (t < contactT) {
+            float a = t / contactT;
+            dx = dir * (int)(peak * a * a);                    // accelerate in
+        } else if (clash_kills(game.battlePlayhead, side, slot)) {
+            // Lethal blow — flung off-screen the instant of contact.
+            float flyT = (t - contactT) / (1.0f - contactT);
+            draw_unit_flyoff(p, side, restX + dir * (int)peak,
+                             BATTLE_FEET, spr, flyT);
+            return;
+        } else {
+            float r = (t - contactT) / (1.0f - contactT);      // recoil bounce
+            dx = dir * (int)(peak * (1.0f - r) - 7.0f * sinf(r * PI_F));
+        }
+    } else if (e && e->kind == BEV_DAMAGE && e->side == side && e->slot == slot) {
+        dx = (int)(sinf(t * 38.0f) * 3.0f);                    // hurt-shake
+    } else if (e && (e->kind == BEV_BUFF || e->kind == BEV_ABILITY) &&
+               e->side == side && e->slot == slot) {
+        dy = -(int)(sinf(t * PI_F) * 5.0f);                    // ability bob
+    }
+
+    render_unit(p->id, p->level, p->atk, p->hp, p->food,
+                restX + dx, BATTLE_FEET + dy, BATTLE_SCALE,
+                false, false, side == 1);
 }
 
 void render_battle_screen(void)

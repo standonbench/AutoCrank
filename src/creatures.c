@@ -262,7 +262,18 @@ void draw_creature(uint8_t petId, int bx, int by)
         case 13: quadruped(bx,by, 2, HORN_IBEX, EAR_ROUND,  COAT_SHAGGY, 0,0,1); break; // Highland
         case 14: quadruped(bx,by, 1, HORN_NONE, EAR_POINTY, COAT_SHAGGY, 0,1,1); break; // Boar
         case 15: quadruped(bx,by, 1, HORN_IBEX, EAR_POINTY, COAT_PLAIN,  0,0,0); break; // Ibex
-        case 16: quadruped(bx,by, 2, HORN_BULL, EAR_ROUND,  COAT_PLAIN,  0,0,1); break; // Reine
+        case 16: {                                                                      // Reine
+            quadruped(bx,by, 2, HORN_BULL, EAR_ROUND, COAT_PLAIN, 0,0,1);
+            // Reine wears the ceremonial bell of the alpine queens.
+            // Offsets mirror quadruped()'s size-2 head geometry.
+            int hX = bx + 20, hY = by + 11, hD = 13;
+            int klX = hX - 5, klY = hY + hD - 8;
+            GFX_LINE(klX + 5, klY - 2, klX + 5, klY + 3, 2, W);     // strap
+            ell(klX, klY, 9, 8, W);                                 // bell body
+            pd->graphics->drawEllipse(klX, klY, 9, 8, 1, 0, 360, B);// bell rim
+            GFX_FILL(klX + 3, klY + 6, 3, 4, B);                    // clapper
+            break;
+        }
         case 17: quadruped(bx,by, 2, HORN_BULL, EAR_ROUND,  COAT_PLAIN,  0,0,0); break; // Bull
         default: quadruped(bx,by, 1, HORN_COW,  EAR_ROUND,  COAT_SPOTS,  0,0,0); break;
     }

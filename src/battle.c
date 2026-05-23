@@ -245,13 +245,39 @@ int battle_event_duration(uint8_t kind) {
         case BEV_CLASH:   return 34;   // rush in, collide, recoil — give it weight
         case BEV_ATTACK:  return 16;
         case BEV_DAMAGE:  return 13;
-        case BEV_FAINT:   return 42;   // stagger pause + fly-off arc
+        case BEV_FAINT:   return 16;   // quick KO fly-off (ability kills)
         case BEV_BUFF:    return 15;
         case BEV_SPAWN:   return 18;
         case BEV_ABILITY: return 14;
         case BEV_RESULT:  return 3;
     }
     return 9;
+}
+
+// Did the faint at `faintIdx` happen as the direct result of a front-line
+// clash? If so its fly-off plays during the clash window — the FAINT event
+// itself needs no window of its own.
+static bool faint_from_clash(int faintIdx) {
+    if (faintIdx < 0 || faintIdx >= game.battleLogLen) return false;
+    BattleEvent* f = &game.battleLog[faintIdx];
+    if (f->kind != BEV_FAINT) return false;
+    for (int i = faintIdx - 1; i >= 0; i--) {
+        BattleEvent* e = &game.battleLog[i];
+        if (e->kind == BEV_ATTACK) return false;
+        if (e->kind == BEV_CLASH)
+            return (f->side == 0 && e->slot == f->slot) ||
+                   (f->side == 1 && e->data == f->slot);
+    }
+    return false;
+}
+
+// Animation window for the event at `playhead`. Clash-driven faints collapse
+// to zero — the dying unit already flew off during the clash window itself.
+int battle_event_window(int playhead) {
+    if (playhead < 0 || playhead >= game.battleLogLen) return 0;
+    BattleEvent* e = &game.battleLog[playhead];
+    if (e->kind == BEV_FAINT && faint_from_clash(playhead)) return 0;
+    return battle_event_duration(e->kind);
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +319,7 @@ void battle_playback_step(void) {
     // Advance through events whose animation window has fully elapsed.
     while (game.battlePlayhead < game.battleLogLen) {
         BattleEvent* e = &game.battleLog[game.battlePlayhead];
-        float dur = (float)battle_event_duration(e->kind);
+        float dur = (float)battle_event_window(game.battlePlayhead);
         if (game.battleClock < dur) break;
         game.battleClock -= dur;
         apply_event(bs, e);
