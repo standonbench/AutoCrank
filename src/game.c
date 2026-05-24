@@ -28,12 +28,15 @@ void game_init(void)
     sound_init();
     save_load();
 
+    // Body text: Pedallica Fun — quirky-but-tight angular sans with
+    // Playdate personality. Banner accent: Sasser Slab Bold — heavy chalet
+    // serif for "ROUND 1" / "YOU WIN!" / titles.
     const char* fontErr = NULL;
-    game.fontBold = pd->graphics->loadFont("Asheville-Sans-14-Bold", &fontErr);
+    game.fontBold = pd->graphics->loadFont("fonts/font-pedallica-fun-14", &fontErr);
     if (!game.fontBold) DLOG("font bold: %s", fontErr ? fontErr : "?");
-    game.fontLarge = pd->graphics->loadFont("Roobert-20-Medium", &fontErr);
+    game.fontLarge = pd->graphics->loadFont("fonts/Sasser-Slab-Bold", &fontErr);
     if (!game.fontLarge) DLOG("font large: %s", fontErr ? fontErr : "?");
-    game.fontSmall = pd->graphics->loadFont("Roobert-11-Medium", &fontErr);
+    game.fontSmall = pd->graphics->loadFont("fonts/font-pedallica", &fontErr);
     if (!game.fontSmall) DLOG("font small: %s", fontErr ? fontErr : "?");
 
     register_debug_menu();
