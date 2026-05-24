@@ -158,13 +158,16 @@ bool battle_resolve_faints(BattleState* bs)
         if (!any) break;
         trig_drain(bs);
         // Emit FAINT events (apply_event clears the slot) unless the handler
-        // already replaced the pet (Cricket → Zombie Cricket spawn).
-        // If the dying pet held Edelweiss (food id 1), a 1/1 Bee Buddy
-        // hatches into the freshly-vacated slot.
+        // already replaced the pet. Detection: id-match alone isn't enough,
+        // because Hopper→Hopper spawns reuse the same id; require hp <= 0 to
+        // confirm the slot still holds the dying pet (a spawn would have set
+        // hp > 0). If the dying pet held Edelweiss (food id 1), a 1/1 Bee
+        // Buddy hatches into the freshly-vacated slot.
         for (int side = 0; side < 2; side++) {
             for (int s = 0; s < TEAM_SIZE; s++) {
                 PetSlot* p = &bs->teams[side].slots[s];
-                if (dead[side][s] != EMPTY_PET && p->id == dead[side][s]) {
+                if (dead[side][s] != EMPTY_PET && p->id == dead[side][s] &&
+                    p->hp <= 0) {
                     bool hadHoney = (p->food == 1);
                     battle_emit(bs, BEV_FAINT, (uint8_t)side, (uint8_t)s, 0, dead[side][s]);
                     if (hadHoney) {

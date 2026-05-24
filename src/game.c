@@ -520,6 +520,7 @@ int update(void* userdata)
 {
     (void)userdata;
     game.frameCount++;
+    if (game.goldFxFrames > 0) game.goldFxFrames--;
 
     PDButtons current, pressed, released;
     pd->system->getButtonState(&current, &pressed, &released);

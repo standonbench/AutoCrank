@@ -446,6 +446,21 @@ void render_topbar(void)
              game.turn, game.shop.gold, game.lives, game.wins, WINS_TO_VICTORY);
     pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding, 8, 2);
 
+    // Gold-counter flash: invert the pixel range of the "GOLD N" substring
+    // when game.goldFxFrames > 0. Strobes every two frames for snap.
+    if (game.goldFxFrames > 0 && game.fontBold) {
+        char prefix[24], gold[24];
+        int prefixLen = snprintf(prefix, sizeof(prefix), "TURN %d   ", game.turn);
+        int goldLen   = snprintf(gold,   sizeof(gold),   "GOLD %d",   game.shop.gold);
+        int xStart = 8 + pd->graphics->getTextWidth(game.fontBold, prefix,
+                                                    prefixLen, kASCIIEncoding, 0);
+        int gw     = pd->graphics->getTextWidth(game.fontBold, gold,
+                                                goldLen, kASCIIEncoding, 0);
+        if ((game.goldFxFrames & 2u) != 0u) {
+            pd->graphics->setDrawMode(kDrawModeInverted);
+            GFX_FILL(xStart - 2, 0, gw + 4, TOPBAR_H, kColorBlack);
+        }
+    }
     pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
@@ -633,17 +648,88 @@ void render_shop_screen(void)
     int teamFeet = 182;
 
     // --- Shop pets ---
+    // During a roll sweep, each unfrozen pet emerges in two phases as the
+    // sweep band crosses its column:
+    //   1) puff cloud blooms (pet invisible)
+    //   2) pet scale-bounces up with overshoot, sparkle ring fading around it
+    // Frozen pets are skipped — they stay rock-stable.
+    const int ROLL_TOTAL = 22;
+    int rollElapsed = 0, rollSweepX = -9999;
+    if (game.shopRollAnim > 0) {
+        rollElapsed = ROLL_TOTAL - (int)game.shopRollAnim;
+        if (rollElapsed < 0) rollElapsed = 0;
+        if (rollElapsed > ROLL_TOTAL) rollElapsed = ROLL_TOTAL;
+        int travel  = SCREEN_W + 100;
+        rollSweepX  = -70 + (travel * rollElapsed) / ROLL_TOTAL;
+    }
     for (int i = 0; i < MAX_SHOP_PETS; i++) {
         bool sel = game.cursorShown && (game.cursor == i);
+        bool frozen = (game.shop.frozenPets & (1 << i)) != 0;
         uint8_t pid = game.shop.pets[i];
         int16_t a = 0, h = 0;
         if (pid != EMPTY_PET) {
             const PetDef* d = pet_def(pid);
             if (d) { a = d->baseAtk; h = d->baseHp; }
         }
-        render_unit(pid, 0, a, h, EMPTY_FOOD, shopColX[i], shopFeet, SC, sel,
+
+        float petSC = SC;
+        int   puffR = 0;
+        int   sparkR = 0;
+        if (game.shopRollAnim > 0 && !frozen) {
+            // Local phase: 0 = sweep band just cleared the column, 1 = full
+            // settle. Shifted by band width so the puff blooms in the trail
+            // (visible behind the band's dotted streak), not under the solid
+            // black body of the band itself.
+            float k = (float)(rollSweepX - shopColX[i] - 24) / 60.0f;
+            if (k < 0.0f) k = 0.0f;
+            if (k > 1.0f) k = 1.0f;
+            if (k <= 0.4f) {
+                petSC = 0.0f;
+                puffR = 5 + (int)(k * 32.0f);                  // 5 → 18
+            } else {
+                float p = (k - 0.4f) / 0.6f;                   // 0..1
+                petSC = SC * (p < 0.6f
+                              ? (p / 0.6f) * 1.18f             // bounce up
+                              : 1.18f - (p - 0.6f) / 0.4f * 0.18f); // settle
+                sparkR = 16 - (int)(p * 12.0f);                // 16 → 4
+            }
+        }
+
+        // Puff cloud — four overlapping white ellipses with black outlines.
+        if (puffR > 0) {
+            int cx = shopColX[i];
+            int cy = shopFeet - (int)(32 * SC) / 2;
+            for (int pi = 0; pi < 4; pi++) {
+                float ang = pi * (PI_F / 2.0f) + 0.7f;
+                int px = cx + (int)(cosf(ang) * (puffR * 0.7f));
+                int py = cy + (int)(sinf(ang) * (puffR * 0.5f));
+                GFX_ELLIPSE(px - puffR / 2, py - puffR / 2,
+                            puffR, puffR, kColorWhite);
+                pd->graphics->drawEllipse(px - puffR / 2, py - puffR / 2,
+                                          puffR, puffR, 1, 0, 360, kColorBlack);
+            }
+        }
+
+        render_unit(pid, 0, a, h, EMPTY_FOOD, shopColX[i], shopFeet, petSC, sel,
                     false, false);
-        if (pid != EMPTY_PET) {
+
+        // Sparkle ring — 6 short radial spokes that contract as pet settles.
+        if (sparkR > 0) {
+            int cx = shopColX[i];
+            int cy = shopFeet - (int)(32 * SC) / 2;
+            for (int sp = 0; sp < 6; sp++) {
+                float ang = sp * (PI_F / 3.0f) + 0.2f;
+                int x1 = cx + (int)(cosf(ang) * sparkR);
+                int y1 = cy + (int)(sinf(ang) * sparkR);
+                int x2 = cx + (int)(cosf(ang) * (sparkR + 5));
+                int y2 = cy + (int)(sinf(ang) * (sparkR + 5));
+                GFX_LINE(x1, y1, x2, y2, 2, kColorBlack);
+            }
+        }
+
+        // Cost badge + frozen mark only when stable.
+        bool stable = (game.shopRollAnim == 0 || frozen);
+        if (pid != EMPTY_PET && stable) {
             int cy = shopFeet - (int)(32 * SC) - 8;
             GFX_ELLIPSE(shopColX[i] - 11, cy - 7, 22, 15, kColorBlack);
             if (game.fontBold) pd->graphics->setFont(game.fontBold);
@@ -652,7 +738,7 @@ void render_shop_screen(void)
                                    shopColX[i] - 8, cy - 8);
             pd->graphics->setDrawMode(kDrawModeCopy);
         }
-        if (game.shop.frozenPets & (1 << i))
+        if (frozen)
             draw_frozen_mark(shopColX[i] + 18, shopFeet - (int)(32 * SC) + 2);
     }
 
@@ -742,17 +828,53 @@ void render_shop_screen(void)
                            (SCREEN_W - hw) / 2, 220);
     pd->graphics->setDrawMode(kDrawModeCopy);
 
-    // --- Roll sweep — a quick black band rides left-to-right across the
-    //     shop pets row so the refill reads as motion, not a teleport.
+    // --- Roll sweep — a wand band rides left-to-right across the shop row.
+    //     Tapered black body with vertical energy stripes, a lightning
+    //     zigzag floating in the dotted trail, and bobbing dust dots
+    //     leading the strike. The per-pet puff + bounce happens above.
     if (game.shopRollAnim > 0) {
-        const int total = 12;
-        int t = total - (int)game.shopRollAnim;       // 0..total elapsed
-        if (t < 0) t = 0;
-        if (t > total) t = total;
-        int sweepX = -50 + (SCREEN_W * t) / total;
-        int sweepY = shopFeet - 56, sweepH = 56;
-        GFX_FILL(sweepX, sweepY, 44, sweepH, kColorBlack);
-        GFX_FILL(sweepX + 44, sweepY, 8, sweepH, (LCDColor)PAT_STONE);
+        int sweepX = rollSweepX;
+        int sweepY = shopFeet - 60;
+        int sweepH = 60;
+
+        // Trail — dotted pattern fading behind
+        GFX_FILL(sweepX - 30, sweepY + 8, 26, sweepH - 16,
+                 (LCDColor)PAT_STONE);
+
+        // Main band — slight wedge (wider at top) for a brush-stroke feel
+        for (int yy = 0; yy < sweepH; yy++) {
+            int w = 22 + (sweepH - yy) / 7;
+            GFX_FILL(sweepX, sweepY + yy, w, 1, kColorBlack);
+        }
+
+        // Vertical white energy stripes inside the band
+        for (int st = 0; st < 3; st++) {
+            int sx = sweepX + 6 + st * 7;
+            GFX_LINE(sx, sweepY + 5, sx, sweepY + sweepH - 5, 1, kColorWhite);
+        }
+
+        // Lightning zigzag floating in the trail
+        int boltX = sweepX - 16;
+        int by1 = sweepY + 10;
+        int bym = sweepY + sweepH / 2;
+        int by2 = sweepY + sweepH - 10;
+        GFX_LINE(boltX,     by1,     boltX + 6, bym - 2, 2, kColorBlack);
+        GFX_LINE(boltX + 6, bym - 2, boltX - 6, bym + 2, 2, kColorBlack);
+        GFX_LINE(boltX - 6, bym + 2, boltX + 4, by2,     2, kColorBlack);
+
+        // Leading-edge bobbing dust dots ahead of the band
+        int leadX = sweepX + 30;
+        for (int k = 0; k < 6; k++) {
+            float phase = (float)rollElapsed * 0.55f + (float)k * 0.95f;
+            int dx = (int)(cosf(phase) * 5.0f) + k * 4;
+            int dy = (int)(sinf(phase * 1.4f) * 12.0f);
+            int px = leadX + dx;
+            int py = sweepY + sweepH / 2 + dy;
+            if (px >= 0 && px < SCREEN_W) {
+                GFX_FILL(px, py, 3, 3, kColorBlack);
+                if (py - 4 >= sweepY) GFX_FILL(px + 1, py - 4, 1, 1, kColorBlack);
+            }
+        }
     }
 
     // --- Hover info card (only when the cursor is awake) ---
@@ -881,33 +1003,70 @@ static void draw_unit_flyoff(PetSlot* p, int side, int cx0, int feetY,
 // Draw a single battle unit with clash / faint / hit animation.
 static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float fx) {
     PetSlot* p = &game.battle.teams[side].slots[slot];
-    if (p->id == EMPTY_PET) return;
 
     int spr   = (int)(32 * BATTLE_SCALE);
     int restX = (int)fx;
 
     // Ability KO — a faint not folded into a clash flies off on its own window.
-    bool isMyFaint = e && e->kind == BEV_FAINT && e->side == side && e->slot == slot;
-    if (isMyFaint) {
+    if (e && e->kind == BEV_FAINT && e->side == side && e->slot == slot) {
+        if (p->id == EMPTY_PET) return;
         battle_burst(restX, BATTLE_FEET - spr / 2, t);
         draw_unit_flyoff(p, side, restX, BATTLE_FEET, spr, t);
         return;
     }
 
+    // Phase 3.4: Spawn shimmer — render the NEW pet emerging using the
+    // event's payload (slot may still hold the dying predecessor until the
+    // SPAWN apply at end-of-window).
+    if (e && e->kind == BEV_SPAWN && e->side == side && e->slot == slot) {
+        uint8_t newPetId = e->data;
+        int newAtk = e->value & 0xFF;
+        int newHp  = (e->value >> 8) & 0xFF;
+        float sc = BATTLE_SCALE * (0.55f + 0.45f * t);
+        int hover = -(int)(sinf(t * PI_F) * 4.0f);
+        render_unit(newPetId, 1, (int16_t)newAtk, (int16_t)newHp, EMPTY_FOOD,
+                    restX, BATTLE_FEET + hover, sc, false, false, side == 1);
+        int cy = BATTLE_FEET + hover - (int)(32 * sc) / 2;
+        int r = (int)(8 + t * 14);
+        for (int a = 0; a < 6; a++) {
+            float ang = a * (PI_F / 3.0f) + t * 0.4f;
+            int x1 = restX + (int)(cosf(ang) * r);
+            int y1 = cy    + (int)(sinf(ang) * r);
+            int x2 = restX + (int)(cosf(ang) * (r + 5));
+            int y2 = cy    + (int)(sinf(ang) * (r + 5));
+            GFX_LINE(x1, y1, x2, y2, 2, kColorBlack);
+        }
+        return;
+    }
+
+    if (p->id == EMPTY_PET) return;
+
+    // BEV_ABILITY's slot is the source of the cascade — let it render even
+    // when hp <= 0 (faint-triggered abilities like Hopper/Goat fire after
+    // the killing blow but before BEV_FAINT).
+    bool isMyAbility = e && e->kind == BEV_ABILITY &&
+                       e->side == side && e->slot == slot;
+
     // Dying-but-not-yet-fainted: a previous event killed this pet but its
     // BEV_FAINT event hasn't animated yet. Hide so it doesn't render at 0/0
     // (and can't catch a hurt-shake from a subsequent matching BEV_DAMAGE).
-    if (p->hp <= 0) return;
+    if (p->hp <= 0 && !isMyAbility) return;
 
     int dx = 0, dy = 0;
 
     if (e && e->kind == BEV_CLASH &&
         ((side == 0 && slot == e->slot) || (side == 1 && slot == e->data))) {
-        const float peak = 26.0f, contactT = 0.42f;
+        const float peak = 26.0f, contactT = 0.42f, windT = 0.12f;
         int dir = (side == 0) ? 1 : -1;            // lunge toward centre
-        if (t < contactT) {
-            float a = t / contactT;
-            dx = dir * (int)(peak * a * a);                    // accelerate in
+        if (t < windT) {
+            // Phase 3.2: brief backward windup before the lunge — anticipation.
+            float w = t / windT;
+            dx = -dir * (int)(w * w * 4.0f);
+        } else if (t < contactT) {
+            // Accelerate from the windup peak (-4) up to +peak at contact.
+            float local = (t - windT) / (contactT - windT);
+            float pos = -4.0f + (peak + 4.0f) * local * local;
+            dx = (int)((float)dir * pos);
         } else if (clash_kills(game.battlePlayhead, side, slot)) {
             // Lethal blow — flung off-screen the instant of contact.
             float flyT = (t - contactT) / (1.0f - contactT);
@@ -925,9 +1084,44 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
         dy = -(int)(sinf(t * PI_F) * 5.0f);                    // ability bob
     }
 
+    // Phase 3.1: Ability glow — pulsing ring + cardinal spikes around the
+    // trigger source so the player can see WHICH pet caused the cascade.
+    if (isMyAbility) {
+        int gx = restX + dx;
+        int gy = BATTLE_FEET + dy - spr / 2;
+        float k = sinf(t * PI_F);                     // 0 → 1 → 0
+        int r = spr / 2 + 4 + (int)(k * 5.0f);
+        pd->graphics->drawEllipse(gx - r, gy - r, r * 2, r * 2,
+                                  3, 0, 360, kColorBlack);
+        int len = 4 + (int)(k * 4);
+        GFX_LINE(gx, gy - r - 1, gx, gy - r - 1 - len, 2, kColorBlack);
+        GFX_LINE(gx, gy + r + 1, gx, gy + r + 1 + len, 2, kColorBlack);
+        GFX_LINE(gx - r - 1, gy, gx - r - 1 - len, gy, 2, kColorBlack);
+        GFX_LINE(gx + r + 1, gy, gx + r + 1 + len, gy, 2, kColorBlack);
+    }
+
     render_unit(p->id, p->level, p->atk, p->hp, p->food,
                 restX + dx, BATTLE_FEET + dy, BATTLE_SCALE,
                 false, false, side == 1);
+
+    // Phase 3.3: Stat-number flash on BUFF. Strobes an inverted disc over
+    // whichever stat badge changed (low byte = atk delta, high byte = hp).
+    if (e && e->kind == BEV_BUFF && e->side == side && e->slot == slot &&
+        t < 0.55f) {
+        int da = e->value & 0xFF;
+        int dh = (e->value >> 8) & 0xFF;
+        int half = spr / 2;
+        int bo = half - 11;
+        int by = BATTLE_FEET + dy - 7;
+        int bx = restX + dx;
+        bool on = ((int)(t * 22.0f) & 1) == 0;
+        if (on) {
+            pd->graphics->setDrawMode(kDrawModeInverted);
+            if (da > 0) GFX_ELLIPSE(bx - bo - 12, by - 12, 24, 24, kColorBlack);
+            if (dh > 0) GFX_ELLIPSE(bx + bo - 12, by - 12, 24, 24, kColorBlack);
+            pd->graphics->setDrawMode(kDrawModeCopy);
+        }
+    }
 }
 
 void render_battle_screen(void)

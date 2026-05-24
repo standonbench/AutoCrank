@@ -235,6 +235,8 @@ typedef struct {
     uint16_t preBattleTimer;
     uint8_t  titleCursor;        // title-screen signpost selection (0..2)
     uint8_t  shopRollAnim;       // countdown timer for the roll-sweep visual
+    int8_t   lastGoldDelta;      // signed gold change for the topbar flash
+    uint8_t  goldFxFrames;       // countdown for the gold-counter flash
 } Game;
 
 extern Game game;

@@ -167,6 +167,10 @@ static void summon_pet_in_slot(BattleState* bs, uint8_t side, uint8_t slot,
 {
     if (slot >= TEAM_SIZE) return;
     battle_emit(bs, BEV_SPAWN, side, slot, encode_pair(atk, hp), petId);
+    // Mark as spawned-via-faint so chain-respawn handlers bail (e.g. Hopper
+    // spawning Zombie Hoppers infinitely when each Zombie's own death fires
+    // the same faint handler). BEV_SPAWN's apply zeroes flags, so set here.
+    bs->teams[side].slots[slot].flags |= 0x04;
     trig_push(TRIG_FRIEND_SUMMONED, side, slot, slot, petId);
 }
 
@@ -212,9 +216,10 @@ static void pet_bee_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEven
 
 static void pet_cricket_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
     if (ev->side != side || ev->srcSlot != slot) return;
+    // Spawned Zombie Hoppers carry the same faint handler; bail if this is
+    // already a spawn so the cascade stops at one zombie per original.
+    if (bs->teams[side].slots[slot].flags & 0x04) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    // Spawn a "Zombie Cricket" in our slot (we reuse Cricket id with level=1, low stats)
-    // Level scales the spawn's stats.
     int16_t s = (int16_t)lvl;
     summon_pet_in_slot(bs, side, slot, 4 /*Cricket*/, s, s);
 }

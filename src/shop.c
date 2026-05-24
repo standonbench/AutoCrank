@@ -1,6 +1,15 @@
 #include "game.h"
 #include <stdio.h>
 
+// Trigger the topbar gold-counter flash. Called from every gold-change site
+// so the player sees the counter react in sync with the +Ng / -Ng popups.
+static void gold_fx(int delta) {
+    if (delta >  127) delta =  127;
+    if (delta < -127) delta = -127;
+    game.lastGoldDelta = (int8_t)delta;
+    game.goldFxFrames  = 12;
+}
+
 // ---------------------------------------------------------------------------
 // Shop tier schedule: T1@T1, T2@T3, T3@T5
 // ---------------------------------------------------------------------------
@@ -71,6 +80,7 @@ bool shop_try_buy_pet(uint8_t shopSlot, uint8_t teamSlot) {
 
     game.shop.pets[shopSlot] = EMPTY_PET;
     game.shop.gold -= PET_COST;
+    gold_fx(-PET_COST);
     sfx_buy();
 
     // Cost popup at the shop slot. Level-up burst + "Ln!" at the team slot.
@@ -115,6 +125,7 @@ bool shop_try_buy_food(uint8_t shopSlot, uint8_t teamSlot) {
     if (FOODS[foodId].apply) FOODS[foodId].apply(&game.player, teamSlot);
     game.shop.foods[shopSlot] = EMPTY_FOOD;
     game.shop.gold -= cost;
+    gold_fx(-cost);
     sfx_buy();
     {
         char buf[8];
@@ -131,6 +142,7 @@ bool shop_try_sell(uint8_t teamSlot) {
     int refund = 1 + p->level - 1;
     if (refund < 1) refund = 1;
     game.shop.gold += refund;
+    gold_fx(refund);
     // Fire SELL trigger before clearing
     trig_push(TRIG_SELL, 0, teamSlot, teamSlot, p->id);
     p->id = EMPTY_PET;
@@ -149,6 +161,7 @@ bool shop_try_sell(uint8_t teamSlot) {
 bool shop_try_roll(void) {
     if (game.shop.gold < ROLL_COST) return false;
     game.shop.gold -= ROLL_COST;
+    gold_fx(-ROLL_COST);
     shop_refill();
     sfx_roll();
     {
@@ -156,7 +169,7 @@ bool shop_try_roll(void) {
         snprintf(buf, sizeof(buf), "-%dg", ROLL_COST);
         shop_popup_text(56, 180, buf);   // floats above the ROLL button
     }
-    game.shopRollAnim = 12;
+    game.shopRollAnim = 22;
     return true;
 }
 
