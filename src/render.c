@@ -1123,14 +1123,28 @@ void render_battle_screen(void)
     if (game.state == STATE_PRE_BATTLE) { e = NULL; t = 0.0f; }
 
     // --- ease unit positions toward their ranked rest spots ---
-    // Dying-but-not-yet-fainted slots (hp <= 0) are excluded from the rank
-    // count so survivors slide forward IMMEDIATELY instead of holding the
-    // line until the deferred BEV_FAINT clears the id.
+    // Dying-but-not-yet-fainted slots are excluded so survivors slide
+    // forward immediately. EXCEPT: if the slot has a pending BEV_SPAWN in
+    // the next few events (Hopper → Zombie Hopper, Sheep → Haflingers,
+    // Edelweiss → Bee), keep it in the rank so the neighbour doesn't
+    // shuffle forward and then snap back when the spawn materialises.
     for (int side = 0; side < 2; side++) {
         int rank = 0;
         for (int i = TEAM_SIZE - 1; i >= 0; i--) {
             PetSlot* p = &game.battle.teams[side].slots[i];
-            if (p->id == EMPTY_PET || p->hp <= 0) continue;
+            if (p->id == EMPTY_PET) continue;
+            if (p->hp <= 0) {
+                bool willRespawn = false;
+                int safety = 6;
+                for (int j = (int)game.battlePlayhead;
+                     j < game.battleLogLen && safety > 0; j++, safety--) {
+                    BattleEvent* ev = &game.battleLog[j];
+                    if (ev->kind == BEV_SPAWN && (int)ev->side == side &&
+                        (int)ev->slot == i) { willRespawn = true; break; }
+                    if (ev->kind == BEV_CLASH || ev->kind == BEV_ATTACK) break;
+                }
+                if (!willRespawn) continue;
+            }
             float tgt = (float)unit_target_x(side, rank);
             float cur = g_unitX[side][i];
             if (cur < 1.0f || cur > 2000.0f || fabsf(tgt - cur) > 150.0f)

@@ -263,7 +263,7 @@ int battle_event_duration(uint8_t kind) {
         case BEV_DAMAGE:  return 13;
         case BEV_FAINT:   return 16;   // quick KO fly-off (ability kills)
         case BEV_BUFF:    return 15;
-        case BEV_SPAWN:   return 18;
+        case BEV_SPAWN:   return 11;
         case BEV_ABILITY: return 14;
         case BEV_RESULT:  return 3;
     }
