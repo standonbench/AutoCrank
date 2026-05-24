@@ -79,6 +79,7 @@ bool shop_try_buy_pet(uint8_t shopSlot, uint8_t teamSlot) {
     }
 
     game.shop.pets[shopSlot] = EMPTY_PET;
+    game.shop.frozenPets &= (uint8_t)~(1 << shopSlot);   // freeze clears on buy
     game.shop.gold -= PET_COST;
     gold_fx(-PET_COST);
     sfx_buy();
@@ -124,6 +125,7 @@ bool shop_try_buy_food(uint8_t shopSlot, uint8_t teamSlot) {
     }
     if (FOODS[foodId].apply) FOODS[foodId].apply(&game.player, teamSlot);
     game.shop.foods[shopSlot] = EMPTY_FOOD;
+    game.shop.frozenFoods &= (uint8_t)~(1 << shopSlot);  // freeze clears on buy
     game.shop.gold -= cost;
     gold_fx(-cost);
     sfx_buy();
@@ -190,8 +192,10 @@ void shop_end_turn_advance(void) {
 
     game.turn++;
     game.shop.gold = STARTING_GOLD;
-    game.shop.frozenPets = 0;
-    game.shop.frozenFoods = 0;
+    // Freeze flags persist into the next turn — that's the whole point. The
+    // shop_refill() call below skips frozen slots, so a frozen pet/food
+    // carries over until the player buys it (which clears its freeze bit)
+    // or toggles freeze off with B.
     shop_refill();
 }
 
