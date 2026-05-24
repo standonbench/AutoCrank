@@ -262,6 +262,8 @@ void render_topbar(void);
 void render_alpine_bg(int horizonY);
 void render_shop_screen(void);
 void render_battle_screen(void);
+void render_battle_reset_positions(void);
+void render_battle_reset_slot_position(int side, int slot);
 
 // Shop layout — exposed so shop.c can anchor popups to the right slot.
 extern const int SHOP_COL_X[3];

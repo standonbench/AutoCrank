@@ -648,19 +648,20 @@ void render_shop_screen(void)
     int teamFeet = 182;
 
     // --- Shop pets ---
-    // During a roll sweep, each unfrozen pet emerges in two phases as the
-    // sweep band crosses its column:
+    // On reroll, each unfrozen pet pops in with a 3-phase emergence,
+    // staggered left-to-right so the three slots cascade:
     //   1) puff cloud blooms (pet invisible)
-    //   2) pet scale-bounces up with overshoot, sparkle ring fading around it
-    // Frozen pets are skipped — they stay rock-stable.
-    const int ROLL_TOTAL = 22;
-    int rollElapsed = 0, rollSweepX = -9999;
+    //   2) pet scale-bounces up with overshoot
+    //   3) sparkle ring contracts and fades
+    // Frozen pets are skipped entirely.
+    const int ROLL_TOTAL  = 15;
+    const int ROLL_STAGGER = 3;        // frames between each pet's pop start
+    const int ROLL_WINDOW  = 9;        // frames each pet's anim lasts
+    int rollElapsed = 0;
     if (game.shopRollAnim > 0) {
         rollElapsed = ROLL_TOTAL - (int)game.shopRollAnim;
         if (rollElapsed < 0) rollElapsed = 0;
         if (rollElapsed > ROLL_TOTAL) rollElapsed = ROLL_TOTAL;
-        int travel  = SCREEN_W + 100;
-        rollSweepX  = -70 + (travel * rollElapsed) / ROLL_TOTAL;
     }
     for (int i = 0; i < MAX_SHOP_PETS; i++) {
         bool sel = game.cursorShown && (game.cursor == i);
@@ -676,11 +677,8 @@ void render_shop_screen(void)
         int   puffR = 0;
         int   sparkR = 0;
         if (game.shopRollAnim > 0 && !frozen) {
-            // Local phase: 0 = sweep band just cleared the column, 1 = full
-            // settle. Shifted by band width so the puff blooms in the trail
-            // (visible behind the band's dotted streak), not under the solid
-            // black body of the band itself.
-            float k = (float)(rollSweepX - shopColX[i] - 24) / 60.0f;
+            int petElapsed = rollElapsed - i * ROLL_STAGGER;
+            float k = (float)petElapsed / (float)ROLL_WINDOW;
             if (k < 0.0f) k = 0.0f;
             if (k > 1.0f) k = 1.0f;
             if (k <= 0.4f) {
@@ -828,54 +826,8 @@ void render_shop_screen(void)
                            (SCREEN_W - hw) / 2, 220);
     pd->graphics->setDrawMode(kDrawModeCopy);
 
-    // --- Roll sweep — a wand band rides left-to-right across the shop row.
-    //     Tapered black body with vertical energy stripes, a lightning
-    //     zigzag floating in the dotted trail, and bobbing dust dots
-    //     leading the strike. The per-pet puff + bounce happens above.
-    if (game.shopRollAnim > 0) {
-        int sweepX = rollSweepX;
-        int sweepY = shopFeet - 60;
-        int sweepH = 60;
-
-        // Trail — dotted pattern fading behind
-        GFX_FILL(sweepX - 30, sweepY + 8, 26, sweepH - 16,
-                 (LCDColor)PAT_STONE);
-
-        // Main band — slight wedge (wider at top) for a brush-stroke feel
-        for (int yy = 0; yy < sweepH; yy++) {
-            int w = 22 + (sweepH - yy) / 7;
-            GFX_FILL(sweepX, sweepY + yy, w, 1, kColorBlack);
-        }
-
-        // Vertical white energy stripes inside the band
-        for (int st = 0; st < 3; st++) {
-            int sx = sweepX + 6 + st * 7;
-            GFX_LINE(sx, sweepY + 5, sx, sweepY + sweepH - 5, 1, kColorWhite);
-        }
-
-        // Lightning zigzag floating in the trail
-        int boltX = sweepX - 16;
-        int by1 = sweepY + 10;
-        int bym = sweepY + sweepH / 2;
-        int by2 = sweepY + sweepH - 10;
-        GFX_LINE(boltX,     by1,     boltX + 6, bym - 2, 2, kColorBlack);
-        GFX_LINE(boltX + 6, bym - 2, boltX - 6, bym + 2, 2, kColorBlack);
-        GFX_LINE(boltX - 6, bym + 2, boltX + 4, by2,     2, kColorBlack);
-
-        // Leading-edge bobbing dust dots ahead of the band
-        int leadX = sweepX + 30;
-        for (int k = 0; k < 6; k++) {
-            float phase = (float)rollElapsed * 0.55f + (float)k * 0.95f;
-            int dx = (int)(cosf(phase) * 5.0f) + k * 4;
-            int dy = (int)(sinf(phase * 1.4f) * 12.0f);
-            int px = leadX + dx;
-            int py = sweepY + sweepH / 2 + dy;
-            if (px >= 0 && px < SCREEN_W) {
-                GFX_FILL(px, py, 3, 3, kColorBlack);
-                if (py - 4 >= sweepY) GFX_FILL(px + 1, py - 4, 1, 1, kColorBlack);
-            }
-        }
-    }
+    // (Reroll sweep band removed — the staggered per-pet puff + bounce +
+    //  sparkle pop carries the animation on its own.)
 
     // --- Hover info card (only when the cursor is awake) ---
     if (game.cursorShown) {
@@ -932,7 +884,20 @@ static BattleEvent* battle_cur_event(float* tOut) {
 #define BATTLE_CX     (SCREEN_W / 2)
 
 // Eased on-screen X per unit, so the line slides forward as units fall.
+// Sentinel -1 means "snap on next frame" — set on battle start and after a
+// FAINT so re-occupied slots don't drift from a stale off-screen flyoff x.
 static float g_unitX[2][TEAM_SIZE];
+
+void render_battle_reset_positions(void) {
+    for (int s = 0; s < 2; s++)
+        for (int i = 0; i < TEAM_SIZE; i++)
+            g_unitX[s][i] = -1.0f;
+}
+
+void render_battle_reset_slot_position(int side, int slot) {
+    if (side < 0 || side >= 2 || slot < 0 || slot >= TEAM_SIZE) return;
+    g_unitX[side][slot] = -1.0f;
+}
 
 // Rest position for a unit at a given rank (0 = frontline). The frontline
 // units rest with a clear gap so the clash lunge across it reads.
@@ -981,6 +946,46 @@ static void battle_burst(int cx, int cy, float k) {
                  cx + (int)(cosf(ang) * r),
                  cy + (int)(sinf(ang) * r), 3, kColorBlack);
     }
+}
+
+// Per-event horizontal offset that battle_draw_unit applies to a sprite
+// (clash lunge, hurt-shake, fly-off in clash window). Extracted so combat-
+// text popups can ride the same offset and stay glued to the sprite instead
+// of floating at the eased rest position.
+static int event_unit_dx(BattleEvent* e, float t, int side, int slot) {
+    if (!e) return 0;
+    if (e->kind == BEV_CLASH) {
+        bool isClasher = (side == 0 && slot == e->slot) ||
+                         (side == 1 && slot == e->data);
+        if (!isClasher) return 0;
+        const float peak = 26.0f, contactT = 0.42f, windT = 0.12f;
+        int dir = (side == 0) ? 1 : -1;
+        if (t < windT) {
+            float w = t / windT;
+            return -dir * (int)(w * w * 4.0f);
+        }
+        if (t < contactT) {
+            float local = (t - windT) / (contactT - windT);
+            float pos = -4.0f + (peak + 4.0f) * local * local;
+            return (int)((float)dir * pos);
+        }
+        if (clash_kills(game.battlePlayhead, side, slot)) {
+            // Sprite flies off — popup rides alongside so the number doesn't
+            // get left behind at the rest position.
+            float flyT = (t - contactT) / (1.0f - contactT);
+            float eo = 1.0f - (1.0f - flyT) * (1.0f - flyT);
+            return -dir * (int)(eo * 540.0f);
+        }
+        float r = (t - contactT) / (1.0f - contactT);
+        return dir * (int)(peak * (1.0f - r) - 7.0f * sinf(r * PI_F));
+    }
+    if (e->kind == BEV_DAMAGE && e->side == side && e->slot == slot) {
+        // P2: divide frequency by playback speed so the shake stays
+        // perceptually consistent at all crank speeds (1×..8×).
+        int spd = (int)game.battleSpeed; if (spd < 1) spd = 1;
+        return (int)(sinf(t * 38.0f / (float)spd) * 3.0f);
+    }
+    return 0;
 }
 
 // KO launch — fling the unit off-screen with a hard spin and a scale punch.
@@ -1039,56 +1044,14 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
         return;
     }
 
-    if (p->id == EMPTY_PET) return;
-
-    // BEV_ABILITY's slot is the source of the cascade — let it render even
-    // when hp <= 0 (faint-triggered abilities like Hopper/Goat fire after
-    // the killing blow but before BEV_FAINT).
+    // Ability glow — pulsing ring + cardinal spikes anchored at the slot's
+    // rest position. Drawn BEFORE the hp gate so faint-triggered abilities
+    // (Hopper, Goat) still show their origin after the pet has flown off.
     bool isMyAbility = e && e->kind == BEV_ABILITY &&
                        e->side == side && e->slot == slot;
-
-    // Dying-but-not-yet-fainted: a previous event killed this pet but its
-    // BEV_FAINT event hasn't animated yet. Hide so it doesn't render at 0/0
-    // (and can't catch a hurt-shake from a subsequent matching BEV_DAMAGE).
-    if (p->hp <= 0 && !isMyAbility) return;
-
-    int dx = 0, dy = 0;
-
-    if (e && e->kind == BEV_CLASH &&
-        ((side == 0 && slot == e->slot) || (side == 1 && slot == e->data))) {
-        const float peak = 26.0f, contactT = 0.42f, windT = 0.12f;
-        int dir = (side == 0) ? 1 : -1;            // lunge toward centre
-        if (t < windT) {
-            // Phase 3.2: brief backward windup before the lunge — anticipation.
-            float w = t / windT;
-            dx = -dir * (int)(w * w * 4.0f);
-        } else if (t < contactT) {
-            // Accelerate from the windup peak (-4) up to +peak at contact.
-            float local = (t - windT) / (contactT - windT);
-            float pos = -4.0f + (peak + 4.0f) * local * local;
-            dx = (int)((float)dir * pos);
-        } else if (clash_kills(game.battlePlayhead, side, slot)) {
-            // Lethal blow — flung off-screen the instant of contact.
-            float flyT = (t - contactT) / (1.0f - contactT);
-            draw_unit_flyoff(p, side, restX + dir * (int)peak,
-                             BATTLE_FEET, spr, flyT);
-            return;
-        } else {
-            float r = (t - contactT) / (1.0f - contactT);      // recoil bounce
-            dx = dir * (int)(peak * (1.0f - r) - 7.0f * sinf(r * PI_F));
-        }
-    } else if (e && e->kind == BEV_DAMAGE && e->side == side && e->slot == slot) {
-        dx = (int)(sinf(t * 38.0f) * 3.0f);                    // hurt-shake
-    } else if (e && (e->kind == BEV_BUFF || e->kind == BEV_ABILITY) &&
-               e->side == side && e->slot == slot) {
-        dy = -(int)(sinf(t * PI_F) * 5.0f);                    // ability bob
-    }
-
-    // Phase 3.1: Ability glow — pulsing ring + cardinal spikes around the
-    // trigger source so the player can see WHICH pet caused the cascade.
     if (isMyAbility) {
-        int gx = restX + dx;
-        int gy = BATTLE_FEET + dy - spr / 2;
+        int gx = restX;
+        int gy = BATTLE_FEET - spr / 2;
         float k = sinf(t * PI_F);                     // 0 → 1 → 0
         int r = spr / 2 + 4 + (int)(k * 5.0f);
         pd->graphics->drawEllipse(gx - r, gy - r, r * 2, r * 2,
@@ -1098,6 +1061,31 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
         GFX_LINE(gx, gy + r + 1, gx, gy + r + 1 + len, 2, kColorBlack);
         GFX_LINE(gx - r - 1, gy, gx - r - 1 - len, gy, 2, kColorBlack);
         GFX_LINE(gx + r + 1, gy, gx + r + 1 + len, gy, 2, kColorBlack);
+    }
+
+    // Don't render the unit sprite for empty or dying slots — the glow above
+    // and the FAINT/SPAWN early-returns handle their respective visuals.
+    if (p->id == EMPTY_PET || p->hp <= 0) return;
+
+    // Lethal clash hit launches the sprite off-screen inside the clash
+    // window itself (instead of waiting for a separate FAINT event).
+    if (e && e->kind == BEV_CLASH &&
+        ((side == 0 && slot == e->slot) || (side == 1 && slot == e->data))) {
+        const float contactT = 0.42f;
+        if (t >= contactT && clash_kills(game.battlePlayhead, side, slot)) {
+            int dir = (side == 0) ? 1 : -1;
+            float flyT = (t - contactT) / (1.0f - contactT);
+            draw_unit_flyoff(p, side, restX + dir * 26,
+                             BATTLE_FEET, spr, flyT);
+            return;
+        }
+    }
+
+    int dx = event_unit_dx(e, t, side, slot);
+    int dy = 0;
+    if (e && (e->kind == BEV_BUFF || e->kind == BEV_ABILITY) &&
+        e->side == side && e->slot == slot) {
+        dy = -(int)(sinf(t * PI_F) * 5.0f);                    // ability bob
     }
 
     render_unit(p->id, p->level, p->atk, p->hp, p->food,
@@ -1135,10 +1123,14 @@ void render_battle_screen(void)
     if (game.state == STATE_PRE_BATTLE) { e = NULL; t = 0.0f; }
 
     // --- ease unit positions toward their ranked rest spots ---
+    // Dying-but-not-yet-fainted slots (hp <= 0) are excluded from the rank
+    // count so survivors slide forward IMMEDIATELY instead of holding the
+    // line until the deferred BEV_FAINT clears the id.
     for (int side = 0; side < 2; side++) {
         int rank = 0;
         for (int i = TEAM_SIZE - 1; i >= 0; i--) {
-            if (game.battle.teams[side].slots[i].id == EMPTY_PET) continue;
+            PetSlot* p = &game.battle.teams[side].slots[i];
+            if (p->id == EMPTY_PET || p->hp <= 0) continue;
             float tgt = (float)unit_target_x(side, rank);
             float cur = g_unitX[side][i];
             if (cur < 1.0f || cur > 2000.0f || fabsf(tgt - cur) > 150.0f)
@@ -1177,17 +1169,22 @@ void render_battle_screen(void)
     }
 
     // --- combat-text popups ---
+    // Anchor each popup at the sprite's CURRENT animated x (rest position
+    // plus the same per-event dx the sprite uses), so the number rises from
+    // above the bouncing/shaking pet rather than its eased rest spot.
     int popTop = BATTLE_FEET - (int)(32 * BATTLE_SCALE) - 14;
     if (e && t > 0.42f && e->kind == BEV_CLASH) {
         int pDmg = e->value & 0xFF, eDmg = (e->value >> 8) & 0xFF;
         char s[8];
         if (eDmg > 0) {
             snprintf(s, sizeof(s), "-%d", eDmg);
-            battle_popup((int)g_unitX[0][e->slot], popTop, s, t - 0.42f);
+            int px = (int)g_unitX[0][e->slot] + event_unit_dx(e, t, 0, e->slot);
+            battle_popup(px, popTop, s, t - 0.42f);
         }
         if (pDmg > 0) {
             snprintf(s, sizeof(s), "-%d", pDmg);
-            battle_popup((int)g_unitX[1][e->data], popTop, s, t - 0.42f);
+            int px = (int)g_unitX[1][e->data] + event_unit_dx(e, t, 1, e->data);
+            battle_popup(px, popTop, s, t - 0.42f);
         }
     } else if (e && (e->kind == BEV_DAMAGE || e->kind == BEV_BUFF) &&
                e->slot < TEAM_SIZE) {
@@ -1199,16 +1196,27 @@ void render_battle_screen(void)
             else if (da) snprintf(s, sizeof(s), "+%d", da);
             else if (dh) snprintf(s, sizeof(s), "+%d", dh);
         }
-        if (s[0]) battle_popup((int)g_unitX[e->side][e->slot], popTop, s, t);
+        if (s[0]) {
+            int px = (int)g_unitX[e->side][e->slot]
+                   + event_unit_dx(e, t, (int)e->side, (int)e->slot);
+            battle_popup(px, popTop, s, t);
+        }
     }
 
     // --- speed indicator ---
     if (game.battleSpeed > 1) {
         char sb[12];
-        snprintf(sb, sizeof(sb), "%dx", (int)game.battleSpeed);
+        int sblen = snprintf(sb, sizeof(sb), "%dx", (int)game.battleSpeed);
         if (game.fontBold) pd->graphics->setFont(game.fontBold);
+        int tx = BATTLE_CX - 8, ty = 24;
+        // 8-offset white halo for legibility against varied backgrounds,
+        // then the black glyph on top — same trick battle_popup uses.
+        pd->graphics->setDrawMode(kDrawModeFillWhite);
+        for (int ox = -1; ox <= 1; ox++)
+            for (int oy = -1; oy <= 1; oy++)
+                pd->graphics->drawText(sb, sblen, kASCIIEncoding, tx + ox, ty + oy);
         pd->graphics->setDrawMode(kDrawModeFillBlack);
-        pd->graphics->drawText(sb, strlen(sb), kASCIIEncoding, BATTLE_CX - 8, 24);
+        pd->graphics->drawText(sb, sblen, kASCIIEncoding, tx, ty);
     }
 
     if (game.fontSmall) pd->graphics->setFont(game.fontSmall);

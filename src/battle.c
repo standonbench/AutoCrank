@@ -25,6 +25,10 @@ void apply_event(BattleState* bs, BattleEvent* e) {
                 p->xp = 0;
                 p->food = EMPTY_FOOD;
                 p->flags = 0;
+                // Mark the slot's eased x as stale; if a SPAWN re-occupies
+                // this slot, the new unit should snap into the rank, not
+                // drift from wherever the flyoff left the position.
+                render_battle_reset_slot_position((int)e->side, (int)e->slot);
             }
             break;
         case BEV_SPAWN:
@@ -185,6 +189,7 @@ bool battle_resolve_faints(BattleState* bs)
 void battle_begin(void) {
     game.battleLogLen = 0;
     trig_reset();
+    render_battle_reset_positions();
 }
 
 void battle_simulate(void) {
@@ -268,16 +273,23 @@ int battle_event_duration(uint8_t kind) {
 // Did the faint at `faintIdx` happen as the direct result of a front-line
 // clash? If so its fly-off plays during the clash window — the FAINT event
 // itself needs no window of its own.
+// Only an IMMEDIATELY-preceding clash counts: any intervening ability,
+// damage, or spawn means the actual cause was something else (AoE, snipe,
+// etc.) and the FAINT should keep its own fly-off window.
 static bool faint_from_clash(int faintIdx) {
     if (faintIdx < 0 || faintIdx >= game.battleLogLen) return false;
     BattleEvent* f = &game.battleLog[faintIdx];
     if (f->kind != BEV_FAINT) return false;
     for (int i = faintIdx - 1; i >= 0; i--) {
         BattleEvent* e = &game.battleLog[i];
-        if (e->kind == BEV_ATTACK) return false;
+        if (e->kind == BEV_ATTACK || e->kind == BEV_ABILITY ||
+            e->kind == BEV_DAMAGE || e->kind == BEV_SPAWN ||
+            e->kind == BEV_BUFF)
+            return false;
         if (e->kind == BEV_CLASH)
             return (f->side == 0 && e->slot == f->slot) ||
                    (f->side == 1 && e->data == f->slot);
+        // BEV_FAINT and BEV_RESULT are skipped (they don't break the chain).
     }
     return false;
 }

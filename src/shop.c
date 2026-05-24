@@ -169,7 +169,7 @@ bool shop_try_roll(void) {
         snprintf(buf, sizeof(buf), "-%dg", ROLL_COST);
         shop_popup_text(56, 180, buf);   // floats above the ROLL button
     }
-    game.shopRollAnim = 22;
+    game.shopRollAnim = 15;
     return true;
 }
 
