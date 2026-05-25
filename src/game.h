@@ -46,6 +46,13 @@ extern PlaydateAPI* pd;
 #define EMPTY_PET        0xFF
 #define EMPTY_FOOD       0xFF
 
+// Sentinel spriteId — Kenney's 1-bit pack has no good fit for our bovid /
+// horned pets (only one cow sprite for 7+ pets that want one). Setting a
+// pet's spriteId to NO_SPRITE skips image loading entirely and forces the
+// procedural creature fallback in draw_creature, which handles cows, goats,
+// ibex horns, bells, etc. natively.
+#define NO_SPRITE        0xFF
+
 #define PET_COST         3
 #define FOOD_COST        3
 #define ROLL_COST        1
@@ -54,7 +61,10 @@ extern PlaydateAPI* pd;
 #define MAX_PET_LEVEL    3
 #define STAT_CAP         50
 
-#define MAX_BATTLE_EVENTS 256
+// Deep SOB chains (Reine|Ibex|Reine|Ibex|Bernard) can generate hundreds of
+// cascading ABILITY/DAMAGE events. 256 was tight enough to truncate playback
+// on stressed late-game boards; 1024 has 3 KB RAM cost and headroom to spare.
+#define MAX_BATTLE_EVENTS 1024
 #define TRIG_QUEUE_MAX    64
 
 // ---------------------------------------------------------------------------
@@ -164,7 +174,9 @@ typedef struct {
     uint8_t baseHp;
     uint8_t tier;
     uint8_t spriteId;
-    const char* description;
+    // One description per level (1..3). Index with [level - 1] so the shop
+    // tooltip shows the actual leveled effect, not the L1 baseline.
+    const char* desc[MAX_PET_LEVEL];
     PetHandler handlers[NUM_TRIGGER_KINDS];
 } PetDef;
 
@@ -177,6 +189,9 @@ typedef struct {
     uint8_t cost;
     uint8_t spriteId;
     bool needsTarget;
+    // Turn at which this food first appears in the shop pool (SAP-style food
+    // tiering). 1 = always available; 3 = T2 unlock; 5 = T3 unlock.
+    uint8_t unlockTurn;
     const char* description;
     FoodApply apply;
 } FoodDef;

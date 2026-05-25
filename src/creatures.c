@@ -241,10 +241,24 @@ static void draw_snake(int bx, int by)
 }
 
 // ---------------------------------------------------------------------------
-// Dispatcher — maps each pet id to its procedural drawing.
+// Dispatcher — uses the loaded 1-bit sprite (16×16) drawn at 2× when an
+// image asset is present for this pet; falls through to the procedural
+// alpine art below if none was loaded. The png-backed path is the default
+// look; procedural is the safety net for missing assets.
 // ---------------------------------------------------------------------------
 void draw_creature(uint8_t petId, int bx, int by)
 {
+    LCDBitmap* sprite = image_pet(petId);
+    if (sprite) {
+        // Kenney 1-bit pack ships sprites as WHITE-on-transparent (for use on
+        // a dark UI). Playdate's screen is white, so we flip the bitmap at
+        // draw time with kDrawModeInverted — transparent pixels stay clear,
+        // sprite body becomes black.
+        pd->graphics->setDrawMode(kDrawModeInverted);
+        pd->graphics->drawScaledBitmap(sprite, bx, by, 2.0f, 2.0f);
+        pd->graphics->setDrawMode(kDrawModeCopy);
+        return;
+    }
     switch (petId) {
         case 0:  quadruped(bx,by, 0, HORN_NONE, EAR_ROUND,  COAT_PLAIN,  0,0,0); break; // Marmot
         case 1:  quadruped(bx,by, 0, HORN_NONE, EAR_FLOPPY, COAT_PLAIN,  1,0,0); break; // Pup
@@ -280,11 +294,22 @@ void draw_creature(uint8_t petId, int bx, int by)
 }
 
 // Draw a creature about its centre (cx, cy): scaled, rotated, optionally
-// mirrored. White is transparent so it drops cleanly onto any background.
-// flip = true mirrors horizontally (so battle enemies face the player).
+// mirrored. When a 1-bit sprite asset exists for this pet, blit it directly
+// (transparency is baked in by pdc — no need to round-trip through a temp
+// bitmap). Procedural fallback for any missing IDs uses white-transparent
+// keying so it still drops cleanly onto any background.
 void draw_creature_xform(uint8_t petId, int cx, int cy, float scale,
                          float deg, bool flip)
 {
+    LCDBitmap* sprite = image_pet(petId);
+    if (sprite) {
+        float s = scale * 2.0f;        // 16×16 source → 32×32 footprint at scale=1
+        pd->graphics->setDrawMode(kDrawModeInverted);
+        pd->graphics->drawRotatedBitmap(sprite, cx, cy, deg, 0.5f, 0.5f,
+                                        flip ? -s : s, s);
+        pd->graphics->setDrawMode(kDrawModeCopy);
+        return;
+    }
     LCDBitmap* bmp = pd->graphics->newBitmap(32, 32, kColorWhite);
     pd->graphics->pushContext(bmp);
     draw_creature(petId, 0, 0);

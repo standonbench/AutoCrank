@@ -547,8 +547,11 @@ static void render_pet_info_card(uint8_t petId, int cursorColX, bool isShopHover
     pd->graphics->drawText(stats, strlen(stats), kASCIIEncoding,
                            cx + 44, cy + 24);
 
-    // Ability description — wrap to a second line if it doesn't fit.
-    const char* desc = def->description ? def->description : "";
+    // Ability description — pick the leveled string (level is 1..MAX_PET_LEVEL).
+    int dlvl = level - 1;
+    if (dlvl < 0) dlvl = 0;
+    if (dlvl >= MAX_PET_LEVEL) dlvl = MAX_PET_LEVEL - 1;
+    const char* desc = def->desc[dlvl] ? def->desc[dlvl] : "";
     int maxW = cw - 12, len = (int)strlen(desc);
     int from = 0, lineY = cy + 40, lineH = 12, drawn = 0;
     while (from < len && drawn < 2) {
@@ -925,11 +928,17 @@ static void battle_popup(int cx, int topY, const char* s, float t) {
 // Will the unit at side/slot be KO'd by the clash logged at `clashIdx`?
 // Used by the clash animation to fold the loser's fly-off into the same
 // window — so a lethal hit launches them off-screen the instant of contact.
+// A BEV_SPAWN at the same slot also counts as evidence the original died —
+// for Sheep/Hopper/Goose-style spawners, battle_resolve_faints replaces the
+// slot before it can emit BEV_FAINT, so without this the sprite would just
+// vanish mid-frame and a new pet would shimmer in with no death animation.
 static bool clash_kills(int clashIdx, int side, int slot) {
     for (int i = clashIdx + 1; i < game.battleLogLen; i++) {
         BattleEvent* e = &game.battleLog[i];
         if (e->kind == BEV_CLASH || e->kind == BEV_ATTACK) break;
         if (e->kind == BEV_FAINT && e->side == side && e->slot == slot)
+            return true;
+        if (e->kind == BEV_SPAWN && e->side == side && e->slot == slot)
             return true;
     }
     return false;
@@ -1044,23 +1053,40 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
         return;
     }
 
-    // Ability glow — pulsing ring + cardinal spikes anchored at the slot's
-    // rest position. Drawn BEFORE the hp gate so faint-triggered abilities
-    // (Hopper, Goat) still show their origin after the pet has flown off.
+    // Ability emanation — a directional fan of rays sprayed from the source
+    // pet toward the target side, plus a small puff over the head. Reads as
+    // "this pet just fired something across the field" instead of the old
+    // crosshair-on-source (which looked like the pet was being targeted).
+    // Drawn BEFORE the hp gate so faint-triggered abilities (Highland, Goat)
+    // still show their origin after the dying sprite has flown off.
     bool isMyAbility = e && e->kind == BEV_ABILITY &&
                        e->side == side && e->slot == slot;
     if (isMyAbility) {
         int gx = restX;
         int gy = BATTLE_FEET - spr / 2;
-        float k = sinf(t * PI_F);                     // 0 → 1 → 0
-        int r = spr / 2 + 4 + (int)(k * 5.0f);
-        pd->graphics->drawEllipse(gx - r, gy - r, r * 2, r * 2,
-                                  3, 0, 360, kColorBlack);
-        int len = 4 + (int)(k * 4);
-        GFX_LINE(gx, gy - r - 1, gx, gy - r - 1 - len, 2, kColorBlack);
-        GFX_LINE(gx, gy + r + 1, gx, gy + r + 1 + len, 2, kColorBlack);
-        GFX_LINE(gx - r - 1, gy, gx - r - 1 - len, gy, 2, kColorBlack);
-        GFX_LINE(gx + r + 1, gy, gx + r + 1 + len, gy, 2, kColorBlack);
+        int dir = (side == 0) ? 1 : -1;           // +1 = sprays right, -1 left
+        float k = sinf(t * PI_F);                  // 0 → 1 → 0 over the window
+        // Five rays fanning across a ~90° arc toward the enemy side. Origin
+        // is the pet's leading edge so the rays don't overlap the sprite.
+        int baseX = gx + dir * (spr / 2 - 2);
+        int len = 10 + (int)(k * 18);
+        for (int i = -2; i <= 2; i++) {
+            float ang = (float)i * 0.32f;          // ~18° between rays
+            int dx = (int)(cosf(ang) * (float)dir * (float)len);
+            int dy = (int)(sinf(ang) * (float)len);
+            GFX_LINE(baseX, gy, baseX + dx, gy + dy, 2, kColorBlack);
+        }
+        // Small spark cluster over the firing pet's head — anchors the "this
+        // is the source" reading without re-creating a crosshair on the body.
+        int sx = gx;
+        int sy = gy - spr / 2 - 4;
+        int sr = 3 + (int)(k * 3);
+        for (int a = 0; a < 4; a++) {
+            float ang = (float)a * (PI_F / 2.0f) + 0.4f;
+            GFX_LINE(sx, sy,
+                     sx + (int)(cosf(ang) * sr),
+                     sy + (int)(sinf(ang) * sr), 2, kColorBlack);
+        }
     }
 
     // Don't render the unit sprite for empty or dying slots — the glow above
@@ -1235,7 +1261,7 @@ void render_battle_screen(void)
 
     if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
     pd->graphics->setDrawMode(kDrawModeFillBlack);
-    const char* h = "crank: faster   A: skip";
+    const char* h = "crank or A: faster";
     int hw = pd->graphics->getTextWidth(game.fontSmall, h, strlen(h),
                                         kASCIIEncoding, 0);
     pd->graphics->drawText(h, strlen(h), kASCIIEncoding,

@@ -175,7 +175,8 @@ bool battle_resolve_faints(BattleState* bs)
                     bool hadHoney = (p->food == 1);
                     battle_emit(bs, BEV_FAINT, (uint8_t)side, (uint8_t)s, 0, dead[side][s]);
                     if (hadHoney) {
-                        int16_t bp = (int16_t)(1 | (1 << 8));      // 1 atk / 1 hp
+                        // Edelweiss hatches a 2/2 Bee Buddy in the vacated slot.
+                        int16_t bp = (int16_t)(2 | (2 << 8));
                         battle_emit(bs, BEV_SPAWN, (uint8_t)side, (uint8_t)s,
                                     bp, 3 /* Bee id */);
                     }
@@ -263,7 +264,7 @@ int battle_event_duration(uint8_t kind) {
         case BEV_DAMAGE:  return 13;
         case BEV_FAINT:   return 16;   // quick KO fly-off (ability kills)
         case BEV_BUFF:    return 15;
-        case BEV_SPAWN:   return 11;
+        case BEV_SPAWN:   return 11;   // shimmer + emerge
         case BEV_ABILITY: return 14;
         case BEV_RESULT:  return 3;
     }
@@ -273,25 +274,35 @@ int battle_event_duration(uint8_t kind) {
 // Did the faint at `faintIdx` happen as the direct result of a front-line
 // clash? If so its fly-off plays during the clash window — the FAINT event
 // itself needs no window of its own.
-// Only an IMMEDIATELY-preceding clash counts: any intervening ability,
-// damage, or spawn means the actual cause was something else (AoE, snipe,
-// etc.) and the FAINT should keep its own fly-off window.
+//
+// We scan back to the most recent CLASH the slot participated in. If between
+// that clash and this FAINT there's been NO further BEV_DAMAGE or BEV_SPAWN
+// for this slot, the unit is the same one that already flew off in the clash
+// window and a second flyoff would look like it "respawned and died again."
+// If there WAS damage/spawn for this slot in between, the killing blow was
+// not the clash (it was an AoE, a faint-counter, etc.) — keep the FAINT
+// animation so the death reads clearly.
 static bool faint_from_clash(int faintIdx) {
     if (faintIdx < 0 || faintIdx >= game.battleLogLen) return false;
     BattleEvent* f = &game.battleLog[faintIdx];
     if (f->kind != BEV_FAINT) return false;
+    int clashIdx = -1;
     for (int i = faintIdx - 1; i >= 0; i--) {
         BattleEvent* e = &game.battleLog[i];
-        if (e->kind == BEV_ATTACK || e->kind == BEV_ABILITY ||
-            e->kind == BEV_DAMAGE || e->kind == BEV_SPAWN ||
-            e->kind == BEV_BUFF)
-            return false;
-        if (e->kind == BEV_CLASH)
-            return (f->side == 0 && e->slot == f->slot) ||
-                   (f->side == 1 && e->data == f->slot);
-        // BEV_FAINT and BEV_RESULT are skipped (they don't break the chain).
+        if (e->kind != BEV_CLASH) continue;
+        bool isParticipant = (f->side == 0 && e->slot == f->slot) ||
+                             (f->side == 1 && e->data == f->slot);
+        if (isParticipant) { clashIdx = i; break; }
     }
-    return false;
+    if (clashIdx < 0) return false;
+    for (int i = clashIdx + 1; i < faintIdx; i++) {
+        BattleEvent* e = &game.battleLog[i];
+        if ((e->kind == BEV_DAMAGE || e->kind == BEV_SPAWN) &&
+            e->side == f->side && e->slot == f->slot) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Animation window for the event at `playhead`. Clash-driven faints collapse
@@ -323,19 +334,15 @@ void battle_playback_step(void) {
     if (crankChange < 6.0f) crankChange = 0.0f;
     int speed = 1 + (int)(crankChange / 5.0f);
     if (speed < 1) speed = 1;
-    if (speed > 8) speed = 8;
-    game.battleSpeed = (uint8_t)speed;
 
+    // A held: speed boost (no longer skips to end — too easy to fat-finger
+    // and miss the whole fight). Floors the speed to 4× while held.
     PDButtons cur, prs, rel;
     pd->system->getButtonState(&cur, &prs, &rel);
-    if (prs & kButtonA) {
-        while (game.battlePlayhead < game.battleLogLen) {
-            apply_event(bs, &game.battleLog[game.battlePlayhead++]);
-        }
-        game.state = STATE_RESULT;
-        game.resultTimer = 0;
-        return;
-    }
+    if ((cur & kButtonA) && speed < 4) speed = 4;
+
+    if (speed > 8) speed = 8;
+    game.battleSpeed = (uint8_t)speed;
 
     game.battleClock += (float)speed;
 

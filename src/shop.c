@@ -32,9 +32,18 @@ void shop_refill(void) {
         if (game.shop.frozenPets & (1 << i)) continue;
         game.shop.pets[i] = pet_random_in_tier(tier);
     }
+    // SAP-style food tiering: only foods whose unlockTurn <= current turn are
+    // eligible. Build the pool once per refill — small (FOOD_COUNT = 6).
+    uint8_t pool[FOOD_COUNT];
+    int n = 0;
+    for (int f = 0; f < FOOD_COUNT; f++) {
+        if (FOODS[f].unlockTurn <= game.turn) pool[n++] = (uint8_t)f;
+    }
+    // Safety: at turn 1 the pool always has Hay + Cheese, so n > 0.
     for (int i = 0; i < MAX_SHOP_FOOD; i++) {
         if (game.shop.frozenFoods & (1 << i)) continue;
-        game.shop.foods[i] = (uint8_t)rng_range(0, FOOD_COUNT - 1);
+        game.shop.foods[i] = (n > 0) ? pool[rng_range(0, n - 1)]
+                                      : (uint8_t)rng_range(0, FOOD_COUNT - 1);
     }
 }
 
@@ -177,11 +186,23 @@ bool shop_try_roll(void) {
 
 void shop_toggle_freeze_pet(uint8_t shopSlot) {
     if (shopSlot >= MAX_SHOP_PETS) return;
+    // Freezing an empty slot would survive the next refill — the slot would
+    // stay permanently empty until the player un-froze it. Guard against that
+    // by no-op'ing the toggle on empty slots; also scrub any stale freeze bit
+    // defensively so the slot is guaranteed to refill next turn.
+    if (game.shop.pets[shopSlot] == EMPTY_PET) {
+        game.shop.frozenPets &= (uint8_t)~(1 << shopSlot);
+        return;
+    }
     game.shop.frozenPets ^= (uint8_t)(1 << shopSlot);
 }
 
 void shop_toggle_freeze_food(uint8_t shopSlot) {
     if (shopSlot >= MAX_SHOP_FOOD) return;
+    if (game.shop.foods[shopSlot] == EMPTY_FOOD) {
+        game.shop.frozenFoods &= (uint8_t)~(1 << shopSlot);
+        return;
+    }
     game.shop.frozenFoods ^= (uint8_t)(1 << shopSlot);
 }
 

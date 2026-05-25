@@ -10,13 +10,17 @@ void images_init(void)
     for (int i = 0; i < FOOD_COUNT; i++) g_foodBmp[i] = NULL;
 
     // Load pets if PNG assets are present (Source/images/pets/pet_NN.png).
-    // Missing files produce a NULL bitmap; renderer falls back to a stub.
+    // Indirection through PETS[i].spriteId lets the roster swap which sprite
+    // a pet uses without renaming any files — handy for matching Kenney's
+    // 1-bit pack art to our Alpine pet names. Missing files produce a NULL
+    // bitmap; renderer falls back to procedural art.
     char path[64];
     const char* err = NULL;
     for (int i = 0; i < PET_COUNT; i++) {
-        snprintf(path, sizeof(path), "images/pets/pet_%02d", i);
+        if (PETS[i].spriteId == NO_SPRITE) continue;  // procedural-only pet
+        snprintf(path, sizeof(path), "images/pets/pet_%02d",
+                 (int)PETS[i].spriteId);
         g_petBmp[i] = pd->graphics->loadBitmap(path, &err);
-        // Silent: pets without art just render the stub.
     }
     for (int i = 0; i < FOOD_COUNT; i++) {
         snprintf(path, sizeof(path), "images/food/food_%02d", i);

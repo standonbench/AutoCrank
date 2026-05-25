@@ -55,28 +55,104 @@ static void food_milk_apply         (Team* team, uint8_t targetSlot);
 // Swiss Alpine roster — Combat des Reines. Abilities unchanged from the
 // original prototype; names + sprites re-themed. spriteId selects the
 // procedural drawer + variant (see creatures.c).
+// Each pet carries one description per level — the shop card picks
+// desc[level-1] so the tooltip matches what the handler actually does at
+// that level. Handlers further down switch on level for qualitative jumps
+// (extra targets, gained held food, expanded trigger pool, etc.).
 const PetDef PETS[PET_COUNT] = {
     // Tier 1 — small alpine & young farm animals
-    [0]  = { "Marmot",    1, 2, 1,  0, "Faint: 1 dmg to a random enemy.",          { H_FAINT  pet_mouse_faint } },
-    [1]  = { "Pup",       3, 2, 1,  1, "Ally summoned: gain +1/+1.",               { H_SUMMON pet_dog_summon } },
-    [2]  = { "Hen",       1, 3, 1,  2, "End of turn: +1/+1 to ally on left.",      { H_EOT    pet_frog_eot } },
-    [3]  = { "Bee",       2, 1, 1,  3, "Battle start: +1 atk to all friends.",     { H_SOB    pet_bee_sob } },
-    [4]  = { "Hopper",    2, 2, 1,  4, "Faint: spawn a 1/1 Hopper here.",          { H_FAINT  pet_cricket_faint } },
-    [5]  = { "Calf",      3, 3, 1,  5, "On buy: add a Milk to the shop.",          { H_BUY    pet_cow_buy } },
+    [0]  = { "Marmot",    2, 2, 1,  0,
+        { "Faint: 2 dmg to a random enemy.",
+          "Faint: 4 dmg to a random enemy.",
+          "Faint: 4 dmg to two random enemies." },
+        { H_FAINT  pet_mouse_faint } },
+    [1]  = { "Pup",       3, 2, 1,  1,
+        { "Ally summoned: gain +1/+1.",
+          "Ally summoned: gain +2/+2.",
+          "Ally summoned: +2/+2 self, +1/+1 to it." },
+        { H_SUMMON pet_dog_summon } },
+    [2]  = { "Hen",       1, 3, 1,  7,
+        { "End of turn: +1/+1 to ally on left.",
+          "End of turn: +2/+1 to ally on left.",
+          "End of turn: +2/+1 to both neighbors." },
+        { H_EOT    pet_frog_eot } },
+    [3]  = { "Bee",       2, 1, 1,  3,
+        { "Battle start: +1 atk to all friends.",
+          "Battle start: +2 atk to all friends.",
+          "Battle start: +2/+1 to all friends." },
+        { H_SOB    pet_bee_sob } },
+    [4]  = { "Hopper",    2, 2, 1,  2,
+        { "Faint: spawn a 1/1 Hopper here.",
+          "Faint: spawn a 2/2 Hopper here.",
+          "Faint: spawn a 3/3 Hopper w/ Edelweiss." },
+        { H_FAINT  pet_cricket_faint } },
+    [5]  = { "Calf",      3, 3, 1,  5,
+        { "On own buy: add Milk to the shop.",
+          "+L1, and any T1 buy: gain +1g.",
+          "+L1, and any buy: gain +2g." },
+        { H_BUY    pet_cow_buy } },
     // Tier 2 — working farm animals
-    [6]  = { "Sheep",     2, 2, 2,  6, "Faint: spawn two 3/3 Haflingers.",         { H_FAINT  pet_sheep_faint } },
-    [7]  = { "Goat",      3, 3, 2,  7, "Faint: 2 dmg to ALL units.",               { H_FAINT  pet_hedgehog_faint } },
-    [8]  = { "Haflinger", 1, 1, 2,  8, "Ally summoned: give it +1 atk.",           { H_SUMMON pet_horse_summon } },
-    [9]  = { "Ox",        1, 4, 2,  9, "Ally faints: gain +1 atk.",                { H_FAINTFRD pet_ox_friendfaint } },
-    [10] = { "Adder",     3, 3, 2, 10, "Ally attacks: 5 dmg to random enemy.",     { H_FRDATK pet_snake_friendatk } },
-    [11] = { "Goose",     2, 2, 2, 11, "Faint: spawn a random T1 (3/3).",          { H_FAINT  pet_spider_faint } },
+    [6]  = { "Sheep",     3, 2, 2, NO_SPRITE,
+        { "Faint: spawn two 2/2 Haflingers.",
+          "Faint: spawn two 4/4 Haflingers.",
+          "Faint: spawn two 6/6 Haflingers." },
+        { H_FAINT  pet_sheep_faint } },
+    [7]  = { "Goat",      3, 3, 2, NO_SPRITE,
+        { "Faint: 2 dmg to all enemies.",
+          "Faint: 3 dmg to all enemies.",
+          "Faint: 4 dmg enemies, 2 dmg friends." },
+        { H_FAINT  pet_hedgehog_faint } },
+    [8]  = { "Haflinger", 2, 2, 2,  8,
+        { "Ally summoned: give it +2 atk.",
+          "Ally summoned: give it +3 atk.",
+          "Ally summoned: give it +3/+2." },
+        { H_SUMMON pet_horse_summon } },
+    [9]  = { "Ox",        2, 4, 2,  9,
+        { "Ally faints: gain +2 atk.",
+          "Ally faints: gain +3 atk.",
+          "Ally faints: +3/+1 and gain Cowbell." },
+        { H_FAINTFRD pet_ox_friendfaint } },
+    [10] = { "Adder",     3, 3, 2, 10,
+        { "Ally attacks: 3 dmg to a random enemy.",
+          "Ally attacks: 5 dmg to a random enemy.",
+          "Ally attacks: 5 dmg to two enemies." },
+        { H_FRDATK pet_snake_friendatk } },
+    [11] = { "Goose",     3, 3, 2,  6,
+        { "Faint: spawn a random T1 (3/3).",
+          "Faint: spawn a random T1 (5/5).",
+          "Faint: spawn a random T1/T2 (5/5)." },
+        { H_FAINT  pet_spider_faint } },
     // Tier 3 — champions of the alp
-    [12] = { "Bernard",   5, 3, 3, 12, "Battle start: 8 dmg to the last enemy.",   { H_SOB    pet_croc_sob } },
-    [13] = { "Highland",  3, 8, 3, 13, "Faint: 5 dmg to a random enemy.",          { H_FAINT  pet_whale_faint } },
-    [14] = { "Boar",      8, 6, 3, 14, "Before attack: gain +2/+2.",               { H_BEFOREATK pet_boar_beforeatk } },
-    [15] = { "Ibex",      3, 3, 3, 15, "Battle start: copy left ally's ability.",  { H_SOB    pet_parrot_sob } },
-    [16] = { "Reine",     4, 3, 3, 16, "Battle start: re-fire right ally x lvl.",  { H_SOB    pet_tiger_sob } },
-    [17] = { "Bull",      6, 8, 3, 17, "Buy a T1 ally: +1/+1 to all friends.",     { H_BUY    pet_dragon_buy } },
+    [12] = { "Bernard",   5, 4, 3, NO_SPRITE,
+        { "Battle start: 8 dmg to last enemy.",
+          "Battle start: 12 dmg to last enemy.",
+          "Battle start: 12 dmg to last two enemies." },
+        { H_SOB    pet_croc_sob } },
+    [13] = { "Highland",  4, 8, 3, 13,
+        { "Faint: 5 dmg to a random enemy.",
+          "Faint: 8 dmg to a random enemy.",
+          "Faint: 8 dmg to all enemies." },
+        { H_FAINT  pet_whale_faint } },
+    [14] = { "Boar",      6, 6, 3,  4,
+        { "Before attack: gain +2/+2.",
+          "Before attack: gain +3/+3.",
+          "Before atk: +4/+4 self, +1 atk friends." },
+        { H_BEFOREATK pet_boar_beforeatk } },
+    [15] = { "Ibex",      3, 4, 3, NO_SPRITE,
+        { "Battle start: copy left ally's ability.",
+          "Battle start: copy left at +1 power.",
+          "Battle start: copy both neighbors." },
+        { H_SOB    pet_parrot_sob } },
+    [16] = { "Reine",     4, 5, 3, NO_SPRITE,
+        { "Battle start: re-fire right ally.",
+          "Battle start: re-fire right ally twice.",
+          "Battle start: re-fire right ally x3." },
+        { H_SOB    pet_tiger_sob } },
+    [17] = { "Bull",      6, 8, 3, NO_SPRITE,
+        { "Buy a T1: +1/+1 to all friends.",
+          "Buy T1/T2: +1/+1 to all friends.",
+          "Buy any ally: +2/+1 to all friends." },
+        { H_BUY    pet_dragon_buy } },
 };
 
 // ---------------------------------------------------------------------------
@@ -110,14 +186,17 @@ uint8_t pet_random_in_tier(uint8_t maxTier) {
 // ---------------------------------------------------------------------------
 // Foods (handlers for the simpler ones; others are stubs for now)
 // ---------------------------------------------------------------------------
+// SAP-style food tiering: T1 foods (turn 1+) are always available; T2 unlocks
+// at turn 3 alongside T2 pets; T3 unlocks at turn 5. shop_refill() filters by
+// game.turn >= unlockTurn.
 const FoodDef FOODS[FOOD_COUNT] = {
-    // Alpine reskin — same mechanics, Swiss-pasture flavour.
-    [0] = { "Hay",       3, 0, true,  "+1 atk and +1 hp to a friend.",        food_apple_apply },
-    [1] = { "Edelweiss", 3, 1, true,  "Held: on faint, spawn a 1/1 Bee.",     food_honey_apply },
-    [2] = { "Salt Lick", 3, 2, true,  "+5 atk for the next battle.",          food_meatbone_apply },
-    [3] = { "Cowbell",   3, 3, true,  "Held: takes 2 less damage.",           food_garlic_apply },
-    [4] = { "Cheese",    1, 4, true,  "Faint a friend (synergies fire).",     food_sleepingpill_apply },
-    [5] = { "Milk",      3, 5, false, "Random friend gains +2/+2.",           food_milk_apply },
+    // name        cost sprite target unlock  desc                                  apply
+    [0] = { "Hay",       3, 0, true,  1, "+1 atk and +1 hp to a friend.",        food_apple_apply },
+    [1] = { "Edelweiss", 3, 1, true,  3, "Held: on faint, spawn a 2/2 Bee.",     food_honey_apply },
+    [2] = { "Salt Lick", 3, 2, true,  5, "+4 atk for the next battle.",          food_meatbone_apply },
+    [3] = { "Cowbell",   3, 3, true,  5, "Held: takes 2 less damage.",           food_garlic_apply },
+    [4] = { "Cheese",    1, 4, true,  1, "Faint a friend (synergies fire).",     food_sleepingpill_apply },
+    [5] = { "Milk",      3, 5, false, 3, "Random friend gains +2/+2.",           food_milk_apply },
 };
 
 // ---------------------------------------------------------------------------
@@ -130,9 +209,16 @@ static int first_empty_slot_side(BattleState* bs, uint8_t side) {
     return -1;
 }
 
+// "Alive" here means id != EMPTY AND hp > 0. A dying pet whose hp has been
+// driven to 0 by a prior event in this drain still occupies its slot until
+// the BEV_FAINT event applies — but treating it as a valid target wastes
+// ability fires (Adder hitting a corpse, Bernard sniping a unit that's
+// already going to faint, etc.) and logs spurious damage events the player
+// can't make sense of. Battle.c's frontmost_alive uses the same gate.
 static int last_alive_slot_side(BattleState* bs, uint8_t side) {
     for (int i = TEAM_SIZE - 1; i >= 0; i--) {
-        if (bs->teams[side].slots[i].id != EMPTY_PET) return i;
+        PetSlot* p = &bs->teams[side].slots[i];
+        if (p->id != EMPTY_PET && p->hp > 0) return i;
     }
     return -1;
 }
@@ -141,7 +227,8 @@ static int random_alive_slot_side(BattleState* bs, uint8_t side) {
     int alive[TEAM_SIZE];
     int n = 0;
     for (int i = 0; i < TEAM_SIZE; i++) {
-        if (bs->teams[side].slots[i].id != EMPTY_PET) alive[n++] = i;
+        PetSlot* p = &bs->teams[side].slots[i];
+        if (p->id != EMPTY_PET && p->hp > 0) alive[n++] = i;
     }
     if (n == 0) return -1;
     return alive[rng_range(0, n - 1)];
@@ -150,7 +237,8 @@ static int random_alive_slot_side(BattleState* bs, uint8_t side) {
 static void deal_damage_to_slot(BattleState* bs, uint8_t side, int slot, int dmg) {
     if (slot < 0 || slot >= TEAM_SIZE) return;
     PetSlot* p = &bs->teams[side].slots[slot];
-    if (p->id == EMPTY_PET) return;
+    // Skip empty AND dying pets — see comment on the alive-helpers above.
+    if (p->id == EMPTY_PET || p->hp <= 0) return;
     // apply_event handles garlic reduction; just emit the raw damage.
     battle_emit(bs, BEV_DAMAGE, side, (uint8_t)slot, (int16_t)dmg, 0);
 }
@@ -178,172 +266,338 @@ static void summon_pet_in_slot(BattleState* bs, uint8_t side, uint8_t slot,
 // Tier 1 pet abilities
 // ---------------------------------------------------------------------------
 static void pet_mouse_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires only on our OWN faint
+    // Fires only on our OWN faint. L1: 2 dmg / 1 target. L2: 4 dmg / 1 target.
+    // L3: 4 dmg / 2 random targets (may repeat — random with replacement).
     if (ev->side != side || ev->srcSlot != slot) return;
-    int dmg = 1 * (int)bs->teams[side].slots[slot].level;
+    int lvl = (int)bs->teams[side].slots[slot].level;
+    int dmg, targets;
+    switch (lvl) {
+        case 1:  dmg = 2; targets = 1; break;
+        case 2:  dmg = 4; targets = 1; break;
+        default: dmg = 4; targets = 2; break;
+    }
     int targetSide = side ^ 1;
-    int t = random_alive_slot_side(bs, (uint8_t)targetSide);
-    if (t < 0) return;
-    deal_damage_to_slot(bs, (uint8_t)targetSide, t, dmg);
-    battle_log_push(BEV_ABILITY, side, slot, dmg, (uint8_t)t);
+    for (int n = 0; n < targets; n++) {
+        int t = random_alive_slot_side(bs, (uint8_t)targetSide);
+        if (t < 0) return;
+        // ABILITY logs the visual cue (glow at source) FIRST, then DAMAGE
+        // applies — so cause-and-effect reads left-to-right at playback.
+        battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)t);
+        deal_damage_to_slot(bs, (uint8_t)targetSide, t, dmg);
+    }
 }
 
 static void pet_dog_summon(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires when any ally is summoned on our side, except us
+    // Fires when any ally is summoned on our side, except us.
+    // L1: +1/+1 self. L2: +2/+2 self. L3: +2/+2 self AND +1/+1 to the summon.
     if (ev->side != side) return;
     if (ev->srcSlot == slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(lvl, lvl), 0);
+    int self_a, self_h, ally_a, ally_h;
+    switch (lvl) {
+        case 1:  self_a = 1; self_h = 1; ally_a = 0; ally_h = 0; break;
+        case 2:  self_a = 2; self_h = 2; ally_a = 0; ally_h = 0; break;
+        default: self_a = 2; self_h = 2; ally_a = 1; ally_h = 1; break;
+    }
+    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(self_a, self_h), 0);
+    if ((ally_a || ally_h) &&
+        ev->dataSlot < TEAM_SIZE &&
+        bs->teams[side].slots[ev->dataSlot].id != EMPTY_PET) {
+        battle_emit(bs, BEV_BUFF, side, ev->dataSlot,
+                    encode_pair(ally_a, ally_h), 0);
+    }
 }
 
 static void pet_frog_eot(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // L1: +1/+1 left. L2: +2/+1 left. L3: +2/+1 to BOTH neighbors.
     (void)ev;
-    if (slot == 0) return;  // no slot to the left
-    int targetSlot = (int)slot - 1;
-    if (bs->teams[side].slots[targetSlot].id == EMPTY_PET) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    battle_emit(bs, BEV_BUFF, side, (uint8_t)targetSlot, encode_pair(lvl, lvl), 0);
+    int a, h;
+    bool buffRight;
+    switch (lvl) {
+        case 1:  a = 1; h = 1; buffRight = false; break;
+        case 2:  a = 2; h = 1; buffRight = false; break;
+        default: a = 2; h = 1; buffRight = true;  break;
+    }
+    if (slot > 0) {
+        int l = (int)slot - 1;
+        if (bs->teams[side].slots[l].id != EMPTY_PET)
+            battle_emit(bs, BEV_BUFF, side, (uint8_t)l, encode_pair(a, h), 0);
+    }
+    if (buffRight && (int)slot + 1 < TEAM_SIZE) {
+        int r = (int)slot + 1;
+        if (bs->teams[side].slots[r].id != EMPTY_PET)
+            battle_emit(bs, BEV_BUFF, side, (uint8_t)r, encode_pair(a, h), 0);
+    }
 }
 
 static void pet_bee_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // L1: +1 atk all friends. L2: +2 atk all. L3: +2/+1 all (gains hp at L3).
     (void)ev;
     int lvl = (int)bs->teams[side].slots[slot].level;
+    int a, h;
+    switch (lvl) {
+        case 1:  a = 1; h = 0; break;
+        case 2:  a = 2; h = 0; break;
+        default: a = 2; h = 1; break;
+    }
     for (int i = 0; i < TEAM_SIZE; i++) {
         if (bs->teams[side].slots[i].id == EMPTY_PET) continue;
-        battle_emit(bs, BEV_BUFF, side, (uint8_t)i, encode_pair(lvl, 0), 0);
+        battle_emit(bs, BEV_BUFF, side, (uint8_t)i, encode_pair(a, h), 0);
     }
 }
 
 static void pet_cricket_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // L1: spawn 1/1 Hopper. L2: 2/2. L3: 3/3 holding Edelweiss (Bee on faint).
     if (ev->side != side || ev->srcSlot != slot) return;
     // Spawned Zombie Hoppers carry the same faint handler; bail if this is
     // already a spawn so the cascade stops at one zombie per original.
     if (bs->teams[side].slots[slot].flags & 0x04) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    int16_t s = (int16_t)lvl;
-    summon_pet_in_slot(bs, side, slot, 4 /*Cricket*/, s, s);
+    int atk, hp;
+    bool withEdelweiss;
+    switch (lvl) {
+        case 1:  atk = 1; hp = 1; withEdelweiss = false; break;
+        case 2:  atk = 2; hp = 2; withEdelweiss = false; break;
+        default: atk = 3; hp = 3; withEdelweiss = true;  break;
+    }
+    summon_pet_in_slot(bs, side, slot, 4 /*Hopper*/, (int16_t)atk, (int16_t)hp);
+    if (withEdelweiss) {
+        // BEV_SPAWN reset food to EMPTY_FOOD inside apply_event; set it again
+        // so the Bee-on-faint hatch (food id 1) fires for the spawned Hopper.
+        bs->teams[side].slots[slot].food = 1;
+    }
 }
 
 static void pet_cow_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires only when WE were bought
-    if (ev->side != side || ev->srcSlot != slot) return;
-    (void)bs;
-    // The card promises Milk — deliver it. Prefer an empty slot, else
-    // overwrite the leftmost unfrozen slot so the gift always lands.
-    for (int i = 0; i < MAX_SHOP_FOOD; i++) {
-        if (game.shop.foods[i] == EMPTY_FOOD) {
-            game.shop.foods[i] = 5;  // Milk
-            return;
+    // Calf fires on any buy on our side. Two effects stack by level:
+    //   L1+: on Calf's OWN buy (or combine into self), drop a Milk in shop.
+    //   L2+: on any qualifying-tier buy, rebate gold:
+    //        L2 = any T1 buy → +1g.   L3 = any buy → +2g.
+    // The any-buy rebate at L3 is what keeps Calf alive after max-level
+    // (without it the ability would never fire again post-combine).
+    if (ev->side != side) return;
+    int lvl = (int)bs->teams[side].slots[slot].level;
+
+    // L1+ — Milk delivery on own buy. Prefer empty, then unfrozen, else slot 0.
+    if (ev->srcSlot == slot) {
+        bool placed = false;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) {
+            if (game.shop.foods[i] == EMPTY_FOOD) {
+                game.shop.foods[i] = 5;
+                placed = true;
+                break;
+            }
+        }
+        if (!placed) {
+            for (int i = 0; i < MAX_SHOP_FOOD; i++) {
+                if (!(game.shop.frozenFoods & (1 << i))) {
+                    game.shop.foods[i] = 5;
+                    placed = true;
+                    break;
+                }
+            }
+            if (!placed) game.shop.foods[0] = 5;
         }
     }
-    for (int i = 0; i < MAX_SHOP_FOOD; i++) {
-        if (!(game.shop.frozenFoods & (1 << i))) {
-            game.shop.foods[i] = 5;
-            return;
+
+    // L2+ — gold rebate on qualifying buys.
+    if (lvl >= 2) {
+        int boughtTier = (int)ev->data;
+        int maxTier, rebate;
+        if (lvl >= 3) { maxTier = 3; rebate = 2; }
+        else          { maxTier = 1; rebate = 1; }
+        if (boughtTier <= maxTier) {
+            game.shop.gold = (int16_t)mini(game.shop.gold + rebate, 99);
+            game.lastGoldDelta = (int8_t)rebate;
+            game.goldFxFrames  = 12;
         }
     }
-    // All slots frozen — let Milk replace slot 0 anyway, this corner case is rare.
-    game.shop.foods[0] = 5;
 }
 
 // ---------------------------------------------------------------------------
 // Tier 2 pet abilities
 // ---------------------------------------------------------------------------
 static void pet_sheep_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // L1: 2 x 2/2 Haflingers. L2: 2 x 4/4. L3: 2 x 6/6.
     if (ev->side != side || ev->srcSlot != slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    int16_t ramAtk = (int16_t)(3 * lvl);
-    int16_t ramHp  = (int16_t)(3 * lvl);
-    // Spawn first Ram in our slot
-    summon_pet_in_slot(bs, side, slot, 8 /*Horse acts as Ram for v0*/, ramAtk, ramHp);
-    // Try to spawn the second in the next empty slot
-    int t = first_empty_slot_side(bs, side);
-    if (t >= 0) {
-        summon_pet_in_slot(bs, side, (uint8_t)t, 8, ramAtk, ramHp);
+    int stat;
+    switch (lvl) {
+        case 1:  stat = 2; break;
+        case 2:  stat = 4; break;
+        default: stat = 6; break;
     }
+    int16_t a = (int16_t)stat, h = (int16_t)stat;
+    summon_pet_in_slot(bs, side, slot, 8 /*Haflinger*/, a, h);
+    int t = first_empty_slot_side(bs, side);
+    if (t >= 0) summon_pet_in_slot(bs, side, (uint8_t)t, 8, a, h);
 }
 
 static void pet_hedgehog_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Goat war-horn AoE. L1: 2 dmg enemies. L2: 3 dmg enemies. L3: 4 dmg
+    // enemies AND 2 dmg friends (the L3 "sacrifice" payoff).
     if (ev->side != side || ev->srcSlot != slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    int dmg = 2 * lvl;
-    for (int sd = 0; sd < 2; sd++) {
+    int enemyDmg, friendDmg;
+    switch (lvl) {
+        case 1:  enemyDmg = 2; friendDmg = 0; break;
+        case 2:  enemyDmg = 3; friendDmg = 0; break;
+        default: enemyDmg = 4; friendDmg = 2; break;
+    }
+    // ABILITY first so the player sees the war-horn glow at Goat's slot
+    // BEFORE the AoE damage numbers start landing on the enemies.
+    battle_log_push(BEV_ABILITY, side, slot, (int16_t)enemyDmg, 0);
+    int enemySide = side ^ 1;
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        deal_damage_to_slot(bs, (uint8_t)enemySide, i, enemyDmg);
+    }
+    if (friendDmg > 0) {
         for (int i = 0; i < TEAM_SIZE; i++) {
-            deal_damage_to_slot(bs, (uint8_t)sd, i, dmg);
+            if (i == slot) continue;  // Goat is already fainting; skip self
+            deal_damage_to_slot(bs, side, i, friendDmg);
         }
     }
-    battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, 0);
 }
 
 static void pet_horse_summon(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Buff the friend that was just summoned (in ev->dataSlot), unless it's us.
+    // Haflinger buff to the just-summoned friend (ev->dataSlot), unless it's us.
+    // L1: +2 atk. L2: +3 atk. L3: +3/+2 (gains hp at L3).
     if (ev->side != side) return;
     if (ev->srcSlot == slot) return;
     if (ev->dataSlot >= TEAM_SIZE) return;
     if (bs->teams[side].slots[ev->dataSlot].id == EMPTY_PET) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    battle_emit(bs, BEV_BUFF, side, ev->dataSlot, encode_pair(lvl, 0), 0);
+    int a, h;
+    switch (lvl) {
+        case 1:  a = 2; h = 0; break;
+        case 2:  a = 3; h = 0; break;
+        default: a = 3; h = 2; break;
+    }
+    battle_emit(bs, BEV_BUFF, side, ev->dataSlot, encode_pair(a, h), 0);
 }
 
 static void pet_ox_friendfaint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires when an ally OTHER THAN US faints
+    // Fires when an ally OTHER THAN US faints.
+    // L1: +2 atk. L2: +3 atk. L3: +3/+1 AND gain Cowbell (bit 0 = -2 dmg taken).
     if (ev->side != side) return;
     if (ev->srcSlot == slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(lvl, 0), 0);
+    int a, h;
+    bool gainCowbell;
+    switch (lvl) {
+        case 1:  a = 2; h = 0; gainCowbell = false; break;
+        case 2:  a = 3; h = 0; gainCowbell = false; break;
+        default: a = 3; h = 1; gainCowbell = true;  break;
+    }
+    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(a, h), 0);
+    if (gainCowbell) {
+        // Set the garlic flag directly — battle_emit has no event kind for
+        // flag-only changes, and apply_event reads p->flags on damage events.
+        bs->teams[side].slots[slot].flags |= 0x01;
+    }
 }
 
 static void pet_snake_friendatk(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires when an ally attacks (not us). Deal 5*lvl to random enemy.
+    // Adder: fires when an ally other than us attacks.
+    // L1: 3 dmg / 1 target. L2: 5 dmg / 1 target. L3: 5 dmg / 2 random targets.
     if (ev->side != side) return;
     if (ev->srcSlot == slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    int dmg = 5 * lvl;
+    int dmg, targets;
+    switch (lvl) {
+        case 1:  dmg = 3; targets = 1; break;
+        case 2:  dmg = 5; targets = 1; break;
+        default: dmg = 5; targets = 2; break;
+    }
     int targetSide = side ^ 1;
-    int t = random_alive_slot_side(bs, (uint8_t)targetSide);
-    if (t < 0) return;
-    deal_damage_to_slot(bs, (uint8_t)targetSide, t, dmg);
-    battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)t);
+    for (int n = 0; n < targets; n++) {
+        int t = random_alive_slot_side(bs, (uint8_t)targetSide);
+        if (t < 0) return;
+        battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)t);
+        deal_damage_to_slot(bs, (uint8_t)targetSide, t, dmg);
+    }
 }
 
 static void pet_spider_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Goose: summon a random pet from a level-gated pool.
+    // L1: T1 at 3/3. L2: T1 at 5/5. L3: T1 or T2 at 5/5.
     if (ev->side != side || ev->srcSlot != slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    // Summon a random T1 pet at 3*lvl / 3*lvl in our slot
-    uint8_t pid = pet_random_in_tier(1);
-    summon_pet_in_slot(bs, side, slot, pid, (int16_t)(3 * lvl), (int16_t)(3 * lvl));
+    int stat;
+    uint8_t maxTier;
+    switch (lvl) {
+        case 1:  stat = 3; maxTier = 1; break;
+        case 2:  stat = 5; maxTier = 1; break;
+        default: stat = 5; maxTier = 2; break;
+    }
+    uint8_t pid = pet_random_in_tier(maxTier);
+    summon_pet_in_slot(bs, side, slot, pid, (int16_t)stat, (int16_t)stat);
 }
 
 // ---------------------------------------------------------------------------
 // Tier 3 pet abilities (simplified for v0)
 // ---------------------------------------------------------------------------
 static void pet_croc_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Bernard snipes the enemy backline at battle start.
+    // L1: 8 dmg / last enemy. L2: 12 dmg / last enemy. L3: 12 dmg / last two.
     (void)ev;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    int dmg = 8 * lvl;
-    int targetSide = side ^ 1;
-    int t = last_alive_slot_side(bs, (uint8_t)targetSide);
-    if (t < 0) return;
-    deal_damage_to_slot(bs, (uint8_t)targetSide, t, dmg);
-    battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)t);
+    int dmg, targets;
+    switch (lvl) {
+        case 1:  dmg = 8;  targets = 1; break;
+        case 2:  dmg = 12; targets = 1; break;
+        default: dmg = 12; targets = 2; break;
+    }
+    int enemySide = side ^ 1;
+    int hit = 0;
+    for (int i = TEAM_SIZE - 1; i >= 0 && hit < targets; i--) {
+        PetSlot* ep = &bs->teams[enemySide].slots[i];
+        if (ep->id == EMPTY_PET || ep->hp <= 0) continue;
+        battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)i);
+        deal_damage_to_slot(bs, (uint8_t)enemySide, i, dmg);
+        hit++;
+    }
 }
 
 static void pet_boar_beforeatk(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires only when WE are the one attacking
+    // Fires only when WE are the one attacking.
+    // L1: +2/+2 self. L2: +3/+3 self. L3: +4/+4 self + +1 atk to all friends.
     if (ev->side != side || ev->srcSlot != slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(2 * lvl, 2 * lvl), 0);
+    int self, friendAtk;
+    switch (lvl) {
+        case 1:  self = 2; friendAtk = 0; break;
+        case 2:  self = 3; friendAtk = 0; break;
+        default: self = 4; friendAtk = 1; break;
+    }
+    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(self, self), 0);
+    if (friendAtk > 0) {
+        for (int i = 0; i < TEAM_SIZE; i++) {
+            if (i == slot) continue;
+            if (bs->teams[side].slots[i].id == EMPTY_PET) continue;
+            battle_emit(bs, BEV_BUFF, side, (uint8_t)i,
+                        encode_pair(friendAtk, 0), 0);
+        }
+    }
 }
 
 static void pet_dragon_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires whenever ANY T1 pet is bought (ev->data holds the bought pet's tier)
-    (void)slot;
+    // Bull buffs the whole team when a qualifying ally is bought.
+    // L1: T1 buys only, +1/+1. L2: T1 or T2 buys, +1/+1. L3: any buy, +2/+1.
     if (ev->side != side) return;
+    int lvl = (int)bs->teams[side].slots[slot].level;
     int boughtTier = (int)ev->data;
-    if (boughtTier != 1) return;
+    int maxTier, buffAtk, buffHp;
+    switch (lvl) {
+        case 1:  maxTier = 1; buffAtk = 1; buffHp = 1; break;
+        case 2:  maxTier = 2; buffAtk = 1; buffHp = 1; break;
+        default: maxTier = 3; buffAtk = 2; buffHp = 1; break;
+    }
+    if (boughtTier > maxTier) return;
     for (int i = 0; i < TEAM_SIZE; i++) {
         if (bs->teams[side].slots[i].id == EMPTY_PET) continue;
-        battle_emit(bs, BEV_BUFF, side, (uint8_t)i, encode_pair(1, 1), 0);
+        battle_emit(bs, BEV_BUFF, side, (uint8_t)i, encode_pair(buffAtk, buffHp), 0);
     }
 }
 
@@ -365,38 +619,75 @@ static void pet_tiger_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEv
     PetHandler h = def->handlers[TRIG_START_OF_BATTLE];
     if (!h) return;
     int times = (int)bs->teams[side].slots[slot].level;  // L1=1, L2=2, L3=3
+    // Self-fire glyph so the player sees "Reine triggered something" — the
+    // re-fired handlers log at the NEIGHBOUR's slot (especially for buffers
+    // where there's no other on-source visual), so without this Reine looks
+    // inert.
+    battle_log_push(BEV_ABILITY, side, slot, 0, slot);
     g_abilityDepth++;
     for (int i = 0; i < times; i++) h(bs, side, (uint8_t)r, ev);
     g_abilityDepth--;
 }
 
 static void pet_parrot_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Copy the start-of-battle ability of the pet on our LEFT (slot-1) and
-    // perform it AS the Parrot (using Parrot's own slot/level).
+    // Ibex copies a neighbour's start-of-battle ability and runs it AS itself
+    // (using Ibex's own slot/level — so the copy already runs at Ibex's level,
+    // i.e. "+1 power" naturally at L2 vs. a typical L1 neighbour).
+    // L1: copy left. L2: copy left (at higher own-level power).
+    // L3: copy both left AND right neighbours.
     if (g_abilityDepth >= ABILITY_MAX_DEPTH) return;
-    int l = (int)slot - 1;
-    if (l < 0) return;
-    PetSlot* p = &bs->teams[side].slots[l];
-    if (p->id == EMPTY_PET) return;
-    const PetDef* def = pet_def(p->id);
-    if (!def) return;
-    PetHandler h = def->handlers[TRIG_START_OF_BATTLE];
-    if (!h) return;
-    g_abilityDepth++;
-    h(bs, side, slot, ev);   // run the copied ability as ourselves
-    g_abilityDepth--;
+    int lvl = (int)bs->teams[side].slots[slot].level;
+
+    int neighbours[2];
+    int n = 0;
+    if ((int)slot - 1 >= 0)            neighbours[n++] = (int)slot - 1;
+    if (lvl >= 3 && (int)slot + 1 < TEAM_SIZE) neighbours[n++] = (int)slot + 1;
+
+    // Self-fire glyph so the player sees Ibex doing something even when the
+    // copied ability has no on-source visual (Bee-style buffers, etc.).
+    bool fired = false;
+    for (int k = 0; k < n; k++) {
+        PetSlot* p = &bs->teams[side].slots[neighbours[k]];
+        if (p->id == EMPTY_PET) continue;
+        const PetDef* def = pet_def(p->id);
+        if (!def) continue;
+        PetHandler h = def->handlers[TRIG_START_OF_BATTLE];
+        if (!h) continue;
+        if (!fired) {
+            battle_log_push(BEV_ABILITY, side, slot, 0, slot);
+            fired = true;
+        }
+        g_abilityDepth++;
+        h(bs, side, slot, ev);
+        g_abilityDepth--;
+        if (g_abilityDepth >= ABILITY_MAX_DEPTH) break;
+    }
 }
 
 static void pet_whale_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Death-bomb: on faint, deal (5 x level) damage to a random enemy.
+    // Highland: death-bomb that grows in shape with level.
+    // L1: 5 dmg / random enemy. L2: 8 dmg / random enemy. L3: 8 dmg / ALL enemies.
     if (ev->side != side || ev->srcSlot != slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    int dmg = 5 * lvl;
-    int targetSide = side ^ 1;
-    int t = random_alive_slot_side(bs, (uint8_t)targetSide);
-    if (t < 0) return;
-    deal_damage_to_slot(bs, (uint8_t)targetSide, t, dmg);
-    battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)t);
+    int dmg;
+    bool aoe;
+    switch (lvl) {
+        case 1:  dmg = 5; aoe = false; break;
+        case 2:  dmg = 8; aoe = false; break;
+        default: dmg = 8; aoe = true;  break;
+    }
+    int enemySide = side ^ 1;
+    if (aoe) {
+        battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, 0);
+        for (int i = 0; i < TEAM_SIZE; i++) {
+            deal_damage_to_slot(bs, (uint8_t)enemySide, i, dmg);
+        }
+    } else {
+        int t = random_alive_slot_side(bs, (uint8_t)enemySide);
+        if (t < 0) return;
+        battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)t);
+        deal_damage_to_slot(bs, (uint8_t)enemySide, t, dmg);
+    }
 }
 
 // ---------------------------------------------------------------------------

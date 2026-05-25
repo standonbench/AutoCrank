@@ -7,7 +7,7 @@
 // correct PASS/FAIL is unambiguous. Results render on STATE_SELFTEST.
 // ===========================================================================
 
-#define MAX_TEST_LINES 28
+#define MAX_TEST_LINES 64
 static char  g_lines[MAX_TEST_LINES][40];
 static uint8_t g_ok[MAX_TEST_LINES];
 static int   g_count = 0;
@@ -30,6 +30,13 @@ static PetSlot mk(uint8_t id, int atk, int hp) {
     p.id = id; p.level = 1; p.xp = 0;
     p.atk = (int16_t)atk; p.hp = (int16_t)hp;
     p.food = EMPTY_FOOD; p.flags = 0;
+    return p;
+}
+
+// Same as mk() but with an explicit level — used to verify L2/L3 ability jumps.
+static PetSlot mkL(uint8_t id, int atk, int hp, uint8_t level) {
+    PetSlot p = mk(id, atk, hp);
+    p.level = level;
     return p;
 }
 
@@ -105,11 +112,13 @@ void selftest_run(void) {
         check("Crocodile start-of-battle", run_battle(p, 1, e, 1) == 0);
     }
 
-    // T6: Sheep faint spawns 2 Rams (3/3) — they win a fight the lone Sheep loses.
+    // T6: Sheep faint spawns 2 Haflingers (2/2 at L1) — they win a fight the
+    // lone Sheep loses. With new L1 spawns (2/2) the cross-summon buffs lift
+    // each to 4/2; one survives Mouse's faint counter-snipe.
     {
         PetSlot p[] = { mk(6, 1, 1) };
-        PetSlot e[] = { mk(0, 1, 1), mk(0, 1, 1) };
-        check("Sheep faint spawn x2", run_battle(p, 1, e, 2) == 0);
+        PetSlot e[] = { mk(0, 1, 4) };
+        check("Sheep faint spawn x2", run_battle(p, 1, e, 1) == 0);
     }
 
     // T7: Ox gains +1 atk when a friend faints. Ox(0 atk) only wins if buffed.
@@ -175,17 +184,18 @@ void selftest_run(void) {
         check("Frog end-of-turn buff", game.player.slots[0].atk == 2);
     }
 
-    // T13: Horse buffs a newly summoned friend (+1 atk).
+    // T13: Haflinger L1 buffs a newly summoned friend (+2 atk). Mouse base
+    // atk is 2 after rebalance, so post-buff = 4.
     {
         clear_team(&game.player);
-        game.player.slots[0] = mk(8, 1, 1);   // Horse
+        game.player.slots[0] = mk(8, 1, 1);   // Haflinger
         memset(&game.shop, 0, sizeof(Shop));
         for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
         for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
-        game.shop.pets[0] = 0;                // Mouse
+        game.shop.pets[0] = 0;                // Marmot (T1)
         game.shop.gold = 100;
-        shop_try_buy_pet(0, 1);               // Mouse summoned into slot 1
-        check("Horse summon buff", game.player.slots[1].atk == 2);
+        shop_try_buy_pet(0, 1);               // Marmot summoned into slot 1
+        check("Haflinger summon buff +2", game.player.slots[1].atk == 4);
     }
 
     // T14: Spider faint summons a Tier-1 pet (BEV_SPAWN of a T1 id).
@@ -300,6 +310,405 @@ void selftest_run(void) {
         game.battleResult = 1;
         game_after_battle();
         check("Last life lost -> game over", game.state == STATE_GAMEOVER);
+    }
+
+    // =======================================================================
+    // L2 / L3 ability scaling — verifies every qualitative jump the rebalance
+    // introduces. Tests are intentionally tight: each one constructs a
+    // scenario where the new behavior is the *only* explanation.
+    // =======================================================================
+
+    // T26: Marmot L3 fires 2 ability events at 4 dmg each.
+    {
+        PetSlot p[] = { mkL(0, 0, 1, 3) };           // L3 Marmot, no atk
+        PetSlot e[] = { mk(0, 10, 10), mk(0, 10, 10) };
+        run_battle(p, 1, e, 2);
+        int n = 0;
+        for (int i = 0; i < game.battleLogLen; i++)
+            if (game.battleLog[i].kind == BEV_ABILITY &&
+                game.battleLog[i].value == 4) n++;
+        check("Marmot L3: 2 x 4 dmg events", n == 2);
+    }
+
+    // T27: Pup L3 buffs SELF +2/+2 AND the just-summoned ally +1/+1.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mkL(1, 3, 2, 3);      // L3 Pup
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.pets[0] = 0;                       // Marmot (base 2/2)
+        game.shop.gold = 100;
+        shop_try_buy_pet(0, 1);
+        bool pupOk = game.player.slots[0].atk == 5 && game.player.slots[0].hp == 4;
+        bool allyOk = game.player.slots[1].atk == 3 && game.player.slots[1].hp == 3;
+        check("Pup L3: self +2/+2 and ally +1/+1", pupOk && allyOk);
+    }
+
+    // T28: Hen L3 buffs BOTH neighbours +2/+1 on end of turn.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mk(0, 1, 2);          // Marmot left
+        game.player.slots[1] = mkL(2, 1, 3, 3);      // L3 Hen
+        game.player.slots[2] = mk(0, 1, 2);          // Marmot right
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.turn = 1;
+        shop_end_turn_advance();
+        bool leftOk  = game.player.slots[0].atk == 3 && game.player.slots[0].hp == 3;
+        bool rightOk = game.player.slots[2].atk == 3 && game.player.slots[2].hp == 3;
+        check("Hen L3: both neighbours +2/+1", leftOk && rightOk);
+    }
+
+    // T29: Bee L3 buffs all friends +2/+1 (the hp component is the L3 jump).
+    {
+        clear_team(&game.battle.teams[0]);
+        clear_team(&game.battle.teams[1]);
+        game.battle.teams[0].slots[0] = mkL(3, 0, 1, 3);  // L3 Bee
+        game.battle.teams[0].slots[1] = mk(0, 1, 1);       // Marmot ally
+        game.battle.inBattle = false;
+        game.battleLogLen = 0;
+        trig_reset();
+        TriggerEvent ev = { TRIG_START_OF_BATTLE, 0, 0, 0, 0 };
+        PETS[3].handlers[TRIG_START_OF_BATTLE](&game.battle, 0, 0, &ev);
+        check("Bee L3: ally +2/+1",
+              game.battle.teams[0].slots[1].atk == 3 &&
+              game.battle.teams[0].slots[1].hp == 2);
+    }
+
+    // T30: Hopper L3 spawns a 3/3 Hopper carrying Edelweiss (food id 1).
+    // Enemy dies on clash so the spawned Hopper survives the simulation; we
+    // can then read its food field after run_battle returns.
+    {
+        PetSlot p[] = { mkL(4, 5, 1, 3) };           // L3 Hopper, dies on clash
+        PetSlot e[] = { mk(0, 1, 1) };               // Mouse dies on clash too
+        run_battle(p, 1, e, 1);
+        check("Hopper L3: spawn holds Edelweiss",
+              game.battle.teams[0].slots[0].id == 4 &&
+              game.battle.teams[0].slots[0].food == 1);
+    }
+
+    // T31: Calf L2 rebates +1g on the combine-buy that takes it to L2. Calf's
+    // BUY handler only fires when Calf itself is the bought pet (srcSlot ==
+    // slot), so triggering a rebate requires buying/combining a Calf.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mk(5, 3, 3);          // L1 Calf
+        game.player.slots[0].xp = LEVEL_2_XP - 1;    // 1 xp; next combine -> L2
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.pets[0] = 5;                       // Calf in shop
+        game.shop.gold = 10;
+        int before = game.shop.gold;
+        shop_try_buy_pet(0, 0);                      // combine -> level 2
+        check("Calf L2: +1g rebate on combine",
+              game.shop.gold == before - PET_COST + 1 &&
+              game.player.slots[0].level == 2);
+    }
+
+    // T32: Calf L3 rebates +2g on the combine that takes it from L2 to L3.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mkL(5, 5, 5, 2);      // L2 Calf 5/5
+        // To reach L3: need cumulative xp = LEVEL_2_XP + LEVEL_3_XP = 5.
+        // Calf already at L2 with xp set so next combine hits 5.
+        game.player.slots[0].xp = LEVEL_2_XP + LEVEL_3_XP - 1;
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.pets[0] = 5;
+        game.shop.gold = 10;
+        int before = game.shop.gold;
+        shop_try_buy_pet(0, 0);                      // combine -> level 3
+        check("Calf L3: +2g rebate on combine",
+              game.shop.gold == before - PET_COST + 2 &&
+              game.player.slots[0].level == 3);
+    }
+
+    // T33: Sheep L3 spawns two 6/6 Haflingers.
+    {
+        PetSlot p[] = { mkL(6, 0, 1, 3) };           // L3 Sheep, dies
+        PetSlot e[] = { mk(0, 5, 5) };
+        run_battle(p, 1, e, 1);
+        int spawned6 = 0;
+        for (int i = 0; i < game.battleLogLen; i++) {
+            if (game.battleLog[i].kind == BEV_SPAWN) {
+                int a = game.battleLog[i].value & 0xFF;
+                int h = (game.battleLog[i].value >> 8) & 0xFF;
+                if (a == 6 && h == 6) spawned6++;
+            }
+        }
+        check("Sheep L3: two 6/6 spawns", spawned6 == 2);
+    }
+
+    // T34: Goat L3 deals 4 to enemies AND 2 to friends. Marmot in slot 0 takes
+    // the friendly-fire (Goat sits frontmost in slot 1 and dies on clash).
+    // Marmot hp 8 because both enemy Mice will also faint and each deal 2 dmg
+    // to a random player (only Marmot alive), so 8 - 2 (Goat) - 2 - 2 = 2.
+    {
+        PetSlot p[] = { mk(0, 0, 8), mkL(7, 0, 1, 3) };  // Marmot + L3 Goat
+        PetSlot e[] = { mk(0, 1, 4), mk(0, 1, 4) };
+        run_battle(p, 2, e, 2);
+        check("Goat L3: Marmot ends at 2 hp (friendly+faint)",
+              game.battle.teams[0].slots[0].hp == 2);
+    }
+
+    // T35: Adder L3 fires 2 ability events per ally attack. Needs two alive
+    // enemies so both Adder hits land — abilities now correctly skip
+    // dying-but-not-yet-cleared corpses, so a single 1-hp dummy would only
+    // get hit once before falling off the random_alive target pool.
+    {
+        PetSlot p[] = { mkL(10, 0, 100, 3), mk(0, 1, 100) };
+        PetSlot e[] = { mk(0, 0, 100), mk(0, 0, 100) }; // 2 tanky dummies
+        run_battle(p, 2, e, 2);
+        int n = 0;
+        for (int i = 0; i < game.battleLogLen; i++) {
+            if (game.battleLog[i].kind == BEV_ABILITY &&
+                game.battleLog[i].value == 5) n++;
+        }
+        // Round 1 fires exactly 2 (one per Adder target). Stop counting at 2
+        // to keep the test independent of how many further safety rounds run.
+        check("Adder L3: 2 hits per ally attack", n >= 2);
+    }
+
+    // T36: Bernard L3 hits the last TWO enemies for 12 dmg each at SOB.
+    {
+        PetSlot p[] = { mkL(12, 1, 1, 3) };          // L3 Bernard
+        PetSlot e[] = { mk(0, 1, 50), mk(0, 1, 50) };
+        run_battle(p, 1, e, 2);
+        int n = 0;
+        for (int i = 0; i < game.battleLogLen; i++)
+            if (game.battleLog[i].kind == BEV_ABILITY &&
+                game.battleLog[i].value == 12) n++;
+        check("Bernard L3: 12 dmg x 2 targets", n == 2);
+    }
+
+    // T37: Highland L3 AoE — every enemy takes 8 on Highland's faint.
+    {
+        PetSlot p[] = { mkL(13, 0, 1, 3) };          // L3 Highland, dies
+        PetSlot e[] = { mk(0, 1, 50), mk(0, 1, 50), mk(0, 1, 50) };
+        run_battle(p, 1, e, 3);
+        int n = 0;
+        for (int i = 0; i < 3; i++) {
+            if (game.battle.teams[1].slots[i].id != EMPTY_PET &&
+                game.battle.teams[1].slots[i].hp <= 50 - 8) n++;
+        }
+        check("Highland L3: AoE hits all 3 enemies", n == 3);
+    }
+
+    // T38: Boar L3 grants its OTHER friends +1 atk on each of its attacks.
+    {
+        PetSlot p[] = { mk(0, 1, 100), mkL(14, 6, 6, 3) };  // Marmot + L3 Boar
+        PetSlot e[] = { mk(0, 0, 100) };                      // soak
+        run_battle(p, 2, e, 1);
+        check("Boar L3: friend gains +1 atk per Boar atk",
+              game.battle.teams[0].slots[0].atk >= 2);
+    }
+
+    // T39: Ibex L3 copies BOTH neighbours' SOB. Bernard's handler reads its
+    // CALLER's slot/level — so Ibex-copied Bernards run at Ibex's level (L3 ->
+    // 12 dmg, 2 targets). Two copies x two targets = 4 ABILITY events of 12.
+    // The own Bernards still fire at L1 = 8 dmg each (irrelevant to this check).
+    {
+        PetSlot p[] = { mk(12, 1, 1), mkL(15, 3, 3, 3), mk(12, 1, 1) };
+        PetSlot e[] = { mk(0, 1, 200), mk(0, 1, 200) };  // 2 targets needed
+        run_battle(p, 3, e, 2);
+        int n = 0;
+        for (int i = 0; i < game.battleLogLen; i++)
+            if (game.battleLog[i].kind == BEV_ABILITY &&
+                game.battleLog[i].value == 12) n++;
+        check("Ibex L3: 4 x 12 dmg from copies", n == 4);
+    }
+
+    // T40: Reine L3 re-fires the right ally x3 (so Bernard fires 4 total).
+    {
+        PetSlot p[] = { mkL(16, 4, 1, 3), mk(12, 1, 1) };
+        PetSlot e[] = { mk(0, 1, 100) };
+        run_battle(p, 2, e, 1);
+        int n = 0;
+        for (int i = 0; i < game.battleLogLen; i++)
+            if (game.battleLog[i].kind == BEV_ABILITY &&
+                game.battleLog[i].value == 8) n++;
+        check("Reine L3: 4 total Bernard fires", n == 4);
+    }
+
+    // T41: Bull L3 triggers on ANY tier buy (T3 here) and grants +2/+1.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mkL(17, 6, 8, 3);     // L3 Bull
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.pets[0] = 13;                      // Highland (T3)
+        game.shop.gold = 100;
+        int before = game.player.slots[0].atk;
+        shop_try_buy_pet(0, 1);
+        check("Bull L3: T3 buy fires +2/+1",
+              game.player.slots[0].atk == before + 2);
+    }
+
+    // T42: Bull L1 does NOT trigger on a T3 buy.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mk(17, 6, 8);         // L1 Bull
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.pets[0] = 13;                      // Highland (T3)
+        game.shop.gold = 100;
+        int before = game.player.slots[0].atk;
+        shop_try_buy_pet(0, 1);
+        check("Bull L1: T3 buy does NOT fire",
+              game.player.slots[0].atk == before);
+    }
+
+    // T43: Ox L3 gains Cowbell flag (bit 0) when an ally faints.
+    {
+        PetSlot p[] = { mkL(9, 1, 20, 3), mk(0, 1, 1) };  // L3 Ox + Marmot
+        PetSlot e[] = { mk(0, 1, 5) };
+        run_battle(p, 2, e, 1);
+        check("Ox L3: gains Cowbell on friend faint",
+              (game.battle.teams[0].slots[0].flags & 0x01) != 0);
+    }
+
+    // T44: Food schedule — at turn 1, only T1 foods (Hay/Cheese) populate shop.
+    {
+        game.turn = 1;
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        bool onlyT1 = true;
+        for (int trial = 0; trial < 100 && onlyT1; trial++) {
+            shop_refill();
+            for (int i = 0; i < MAX_SHOP_FOOD; i++) {
+                uint8_t f = game.shop.foods[i];
+                if (f < FOOD_COUNT && FOODS[f].unlockTurn > 1) {
+                    onlyT1 = false; break;
+                }
+            }
+        }
+        check("Food schedule: turn 1 only T1 foods", onlyT1);
+    }
+
+    // T_Haflinger_L3: Haflinger L3 gives +3/+2 to the summoned ally.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mkL(8, 2, 2, 3);      // L3 Haflinger
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.pets[0] = 0;                       // Marmot (base 2/2)
+        game.shop.gold = 100;
+        shop_try_buy_pet(0, 1);
+        // Marmot base 2/2, +3/+2 = 5/4.
+        check("Haflinger L3: summon +3/+2",
+              game.player.slots[1].atk == 5 && game.player.slots[1].hp == 4);
+    }
+
+    // T_Adder_DeadTarget: Adder should NOT fire on an ally attack that
+    // already killed the only enemy. Previously the random_alive helper
+    // returned dying-but-still-in-slot pets, so Adder wasted hits on corpses.
+    {
+        PetSlot p[] = { mk(10, 0, 100), mk(0, 100, 100) }; // Adder + heavy ally
+        PetSlot e[] = { mk(0, 0, 1) };                     // dies in 1 hit
+        run_battle(p, 2, e, 1);
+        int adderHits = 0;
+        for (int i = 0; i < game.battleLogLen; i++)
+            if (game.battleLog[i].kind == BEV_ABILITY &&
+                game.battleLog[i].value == 3) adderHits++;
+        // Marmot killed the dummy in clash, then FRIEND_ATTACK fires — Adder
+        // should find no alive enemy and bail. Pre-fix: hit corpse for 3.
+        check("Adder no-fires on corpse", adderHits == 0);
+    }
+
+    // T_Ibex_NoNeighbour: Ibex alone at slot 0 has no left neighbour to copy.
+    // SOB should safely no-op (regression guard for the bounds-check path).
+    {
+        clear_team(&game.battle.teams[0]);
+        clear_team(&game.battle.teams[1]);
+        game.battle.teams[0].slots[0] = mkL(15, 3, 4, 1);
+        game.battle.teams[1].slots[0] = mk(0, 1, 1);
+        game.battle.inBattle = true;
+        battle_simulate();
+        game.battle.inBattle = false;
+        check("Ibex alone: no-op safely", game.battleResult <= 2);
+    }
+
+    // T_Ibex_L1_LeftOnly: Ibex L1 with a Bernard to its LEFT copies Bernard's
+    // SOB and fires 1 extra Bernard snipe (8 dmg). Without a right neighbour
+    // copy at L1, total Bernard fires = 2 (own + Ibex's copy).
+    {
+        PetSlot p[] = { mk(12, 1, 1), mkL(15, 3, 4, 1) }; // Bernard, Ibex L1
+        PetSlot e[] = { mk(0, 1, 100) };
+        run_battle(p, 2, e, 1);
+        int n8 = 0;
+        for (int i = 0; i < game.battleLogLen; i++)
+            if (game.battleLog[i].kind == BEV_ABILITY &&
+                game.battleLog[i].value == 8) n8++;
+        check("Ibex L1: copies left ally SOB", n8 == 2);
+    }
+
+    // T_Freeze_Empty: freezing an empty shop slot should be a no-op, not a
+    // permanent skip. Without the fix, shop_refill would skip the slot every
+    // turn and it would stay empty forever (until the player un-froze it).
+    {
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        // Attempt to freeze empty pet slot 0 and empty food slot 0.
+        shop_toggle_freeze_pet(0);
+        shop_toggle_freeze_food(0);
+        // Refill — both slots should populate (freeze bit was not set).
+        shop_refill();
+        bool petOk  = (game.shop.frozenPets  & 0x1) == 0 && game.shop.pets[0]  != EMPTY_PET;
+        bool foodOk = (game.shop.frozenFoods & 0x1) == 0 && game.shop.foods[0] != EMPTY_FOOD;
+        check("Freeze on empty slot is a no-op", petOk && foodOk);
+    }
+
+    // T_Freeze_Persists: freezing a real shop pet keeps it across refill.
+    {
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.pets[0] = 12;          // Bernard
+        shop_toggle_freeze_pet(0);
+        shop_refill();
+        check("Freeze on real pet persists across refill",
+              game.shop.pets[0] == 12 && (game.shop.frozenPets & 0x1));
+    }
+
+    // T_Goose_L3: Goose L3 spawns at 5/5 (was 3/3 at L1) from T1-or-T2 pool.
+    {
+        PetSlot p[] = { mkL(11, 0, 1, 3) };          // L3 Goose, dies on clash
+        PetSlot e[] = { mk(0, 5, 5) };
+        run_battle(p, 1, e, 1);
+        int spawned5 = 0;
+        for (int i = 0; i < game.battleLogLen; i++) {
+            if (game.battleLog[i].kind == BEV_SPAWN) {
+                int a = game.battleLog[i].value & 0xFF;
+                int h = (game.battleLog[i].value >> 8) & 0xFF;
+                if (a == 5 && h == 5) spawned5++;
+            }
+        }
+        check("Goose L3: spawn at 5/5", spawned5 >= 1);
+    }
+
+    // T45: Food schedule — at turn 5 the T3 foods can actually appear.
+    {
+        game.turn = 5;
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        bool sawT3 = false;
+        for (int trial = 0; trial < 400 && !sawT3; trial++) {
+            shop_refill();
+            for (int i = 0; i < MAX_SHOP_FOOD; i++) {
+                uint8_t f = game.shop.foods[i];
+                if (f < FOOD_COUNT && FOODS[f].unlockTurn >= 5) sawT3 = true;
+            }
+        }
+        check("Food schedule: turn 5 reveals T3 foods", sawT3);
     }
 
     DLOG("SELFTEST: %d passed, %d failed", g_pass, g_fail);
