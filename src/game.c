@@ -57,6 +57,7 @@ static void menu_toggle_debug(void* userdata) {
 
 static PDMenuItem* g_mPreset = NULL;
 static PDMenuItem* g_mCheat  = NULL;
+static PDMenuItem* g_mPreview = NULL;
 
 static void menu_team_preset(void* userdata) {
     (void)userdata;
@@ -102,6 +103,74 @@ static void menu_cheat_battle(void* userdata) {
     pd->system->setMenuItemValue(g_mCheat, 0);
 }
 
+// Jump straight to an animated screen — saves 5+ minutes per polish iteration.
+static void menu_preview_jump(void* userdata) {
+    (void)userdata;
+    if (!g_mPreview) return;
+    int idx = pd->system->getMenuItemValue(g_mPreview);
+    if (idx == 0) return;
+
+    // Common: ensure a plausible run/team is set up so the animations have
+    // something to draw.
+    if (!game.inRun) game_start_run();
+    // give the player a recognisable team so we can eyeball it
+    const uint8_t demo[5] = { 5, 13, 7, 17, 16 };  // Calf Highland Goat Bear Fox
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        uint8_t pid = demo[i];
+        const PetDef* def = pet_def(pid);
+        game.player.slots[i].id = pid;
+        game.player.slots[i].level = 2;
+        game.player.slots[i].xp = 0;
+        game.player.slots[i].atk = def ? def->baseAtk : 3;
+        game.player.slots[i].hp  = def ? def->baseHp  : 3;
+        game.player.slots[i].food = EMPTY_FOOD;
+        game.player.slots[i].flags = 0;
+    }
+    // Player name "Sus Yodelers" so screens have a real string to show.
+    game.playerName.adj  = 15;  // Sus
+    game.playerName.noun = 3;   // Yodelers
+    game.enemyName.adj   = 1;   // Horny
+    game.enemyName.noun  = 21;  // Pretzels
+
+    switch (idx) {
+    case 1: // PreBattle
+        ai_generate_opponent(&game.battle.teams[1], game.turn,
+                             game.runSeed ^ (game.turn * 0x9E3779B9));
+        game.battle.teams[0] = game.player;
+        game.state = STATE_PRE_BATTLE;
+        game.preBattleTimer = 90;
+        break;
+    case 2: // Result Win
+        game.battleResult = 0;
+        game.state = STATE_RESULT;
+        game.resultTimer = 0;
+        break;
+    case 3: // Result Loss
+        game.battleResult = 1;
+        if (game.lives > 0) game.lives--;
+        game.state = STATE_RESULT;
+        game.resultTimer = 0;
+        break;
+    case 4: // Result Draw
+        game.battleResult = 2;
+        game.state = STATE_RESULT;
+        game.resultTimer = 0;
+        break;
+    case 5: // GameOver
+        game.lives = 0;
+        game.state = STATE_GAMEOVER;
+        game.resultTimer = 0;
+        break;
+    case 6: // Victory
+        game.wins = WINS_TO_VICTORY;
+        hof_record_win();
+        game.state = STATE_VICTORY;
+        game.resultTimer = 0;
+        break;
+    }
+    pd->system->setMenuItemValue(g_mPreview, 0);
+}
+
 static void register_debug_menu(void) {
     pd->system->addCheckmarkMenuItem("Debug Overlay", 0, menu_toggle_debug, NULL);
 
@@ -113,6 +182,12 @@ static void register_debug_menu(void) {
     static const char* cheatTitles[] = { "-", "+5g", "Turn 5", "Win", "Reset" };
     g_mCheat = pd->system->addOptionsMenuItem(
         "Cheat", cheatTitles, 5, menu_cheat_battle, NULL);
+
+    static const char* previewTitles[] = {
+        "-", "PreBattle", "Win", "Loss", "Draw", "GameOver", "Victory"
+    };
+    g_mPreview = pd->system->addOptionsMenuItem(
+        "Preview", previewTitles, 7, menu_preview_jump, NULL);
 }
 
 // Pre-baked test teams for fast synergy iteration.
@@ -200,6 +275,21 @@ void game_advance_to_battle(void)
     // Build enemy team
     ai_generate_opponent(&game.battle.teams[1], game.turn, game.runSeed ^ (game.turn * 0x9E3779B9));
 
+    // Pick an enemy team name from the same word pool the player uses. Seeded
+    // off the turn so each round's nemesis has a fresh identity.
+    {
+        uint32_t s = game.runSeed ^ (game.turn * 0xDEADBEEFu);
+        s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+        game.enemyName.adj  = (uint8_t)(s % NAME_ADJ_COUNT);
+        s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+        game.enemyName.noun = (uint8_t)(s % NAME_NOUN_COUNT);
+        // Avoid an exact-self collision — a tiny indignity, but real.
+        if (game.enemyName.adj  == game.playerName.adj &&
+            game.enemyName.noun == game.playerName.noun) {
+            game.enemyName.noun = (uint8_t)((game.enemyName.noun + 1) % NAME_NOUN_COUNT);
+        }
+    }
+
     // Snapshot player into battle state
     game.battle.teams[0] = game.player;
     game.battle.inBattle = true;
@@ -222,7 +312,7 @@ void game_advance_to_battle(void)
     game.battle.teams[1] = game.battle.initial[1];
 
     game.state = STATE_PRE_BATTLE;
-    game.preBattleTimer = 60;       // 2 seconds at 30fps
+    game.preBattleTimer = 90;       // 3.0s: 30f intro + 60f hold/exit
 }
 
 void game_after_battle(void)
@@ -268,10 +358,13 @@ void game_after_battle(void)
     save_write();
 
     if (game.wins >= WINS_TO_VICTORY) {
+        hof_record_win();
         game.state = STATE_VICTORY;
+        game.resultTimer = 0;
         sfx_win();
     } else if (game.lives == 0) {
         game.state = STATE_GAMEOVER;
+        game.resultTimer = 0;
         sfx_lose();
     } else {
         shop_end_turn_advance();
@@ -573,8 +666,33 @@ int update(void* userdata)
         ui_gallery_render();
         break;
     }
+    case STATE_TEAM_NAME:
+        ui_team_name_update();
+        ui_team_name_render();
+        break;
+    case STATE_HALL_OF_FAME:
+        ui_hof_update();
+        ui_hof_render();
+        break;
     }
 
     if (g_debugOverlay) pd->system->drawFPS(SCREEN_W - 22, 2);
     return 1;
+}
+
+// ---------------------------------------------------------------------------
+// Hall of Fame — snapshot the winning team into the ring buffer.
+// ---------------------------------------------------------------------------
+void hof_record_win(void) {
+    WinRecord* r = &game.hof[game.hofNext];
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        r->pets[i]   = game.player.slots[i].id;
+        r->levels[i] = game.player.slots[i].level;
+    }
+    r->turn = game.turn;
+    r->name = game.playerName;
+    r->used = 1;
+    game.hofNext = (uint8_t)((game.hofNext + 1) % HOF_SIZE);
+    if (game.hofCount < HOF_SIZE) game.hofCount++;
+    DLOG("HOF record: %s, turn %u", "(see name pool)", game.turn);
 }

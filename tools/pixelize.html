@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pixelize for Playdate</title>
+<style>
+  :root {
+    --bg: #1a1a1a; --panel: #242424; --ink: #eee; --muted: #888;
+    --accent: #ffcc33; --border: #333;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px; font: 13px/1.4 -apple-system, system-ui, sans-serif;
+    background: var(--bg); color: var(--ink); min-height: 100vh;
+  }
+  h1 { margin: 0 0 16px; font-size: 18px; font-weight: 600; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .app { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
+  .controls { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px; }
+  .preview { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .drop {
+    background: var(--panel); border: 2px dashed var(--border); border-radius: 6px;
+    padding: 24px; text-align: center; cursor: pointer; transition: border-color .15s;
+  }
+  .drop.hover { border-color: var(--accent); }
+  .drop input { display: none; }
+  .drop .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .group { margin-bottom: 14px; }
+  .group:last-child { margin-bottom: 0; }
+  .group label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  select, input[type=number], input[type=text] {
+    background: #111; color: var(--ink); border: 1px solid var(--border);
+    border-radius: 4px; padding: 5px 8px; font: inherit; width: 100%;
+  }
+  input[type=range] { width: 100%; }
+  .val { font-variant-numeric: tabular-nums; color: var(--accent); min-width: 38px; text-align: right; font-size: 12px; }
+  .swatch { display: flex; gap: 4px; }
+  .swatch button {
+    flex: 1; padding: 4px 6px; background: #111; color: var(--ink);
+    border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font: inherit;
+  }
+  .swatch button.on { background: var(--accent); color: #111; border-color: var(--accent); }
+  .swatch button:hover:not(.on) { border-color: #555; }
+  .actions { display: flex; gap: 8px; margin-top: 16px; }
+  .actions button {
+    flex: 1; padding: 8px; background: var(--accent); color: #111; border: 0;
+    border-radius: 4px; cursor: pointer; font: inherit; font-weight: 600;
+  }
+  .actions button.secondary { background: #333; color: var(--ink); }
+  .canvas-wrap {
+    background: #0a0a0a; border: 1px solid var(--border); border-radius: 6px;
+    padding: 16px; display: flex; justify-content: center; align-items: center;
+    min-height: 280px;
+  }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; max-width: 100%; }
+  .meta { color: var(--muted); font-size: 11px; text-align: center; }
+  .checkbox { display: flex; align-items: center; gap: 6px; }
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .source-thumb { max-width: 200px; max-height: 120px; border: 1px solid var(--border); border-radius: 3px; }
+  .source-info { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; font-size: 11px; color: var(--muted); }
+  .size-custom { display: none; }
+  .size-custom.shown { display: flex; gap: 6px; margin-top: 6px; }
+  .size-custom input { width: 70px; }
+</style>
+</head>
+<body>
+<h1>Pixelize <span>· image → 1-bit Playdate pixel art</span></h1>
+
+<div class="app">
+  <div class="controls">
+    <div class="group">
+      <label>Source</label>
+      <div class="drop" id="drop">
+        <div>Drop image or click</div>
+        <div class="hint">PNG / JPG / WEBP</div>
+        <input type="file" id="file" accept="image/*">
+      </div>
+      <div id="src-info" class="source-info" style="display:none; margin-top:8px;">
+        <span id="src-dims"></span>
+      </div>
+    </div>
+
+    <div class="group">
+      <label>Size</label>
+      <div class="swatch" id="size-swatch">
+        <button data-size="full" class="on">Full 400×240</button>
+        <button data-size="32">32</button>
+        <button data-size="16">16</button>
+        <button data-size="custom">Custom</button>
+      </div>
+      <div class="size-custom" id="size-custom">
+        <input type="number" id="size-w" value="400" min="1">
+        <span style="color:var(--muted)">×</span>
+        <input type="number" id="size-h" value="240" min="1">
+      </div>
+    </div>
+
+    <div class="group">
+      <label>Fit</label>
+      <div class="swatch" id="fit-swatch">
+        <button data-fit="cover" class="on">Cover</button>
+        <button data-fit="contain">Contain</button>
+        <button data-fit="stretch">Stretch</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <label>Crop anchor (cover mode)</label>
+      <div class="row">
+        <span style="font-size:11px;color:var(--muted);width:14px">X</span>
+        <input type="range" id="crop-x" min="0" max="1" step="0.05" value="0.5">
+        <span class="val" id="crop-x-val">0.50</span>
+      </div>
+      <div class="row">
+        <span style="font-size:11px;color:var(--muted);width:14px">Y</span>
+        <input type="range" id="crop-y" min="0" max="1" step="0.05" value="0.5">
+        <span class="val" id="crop-y-val">0.50</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <label>Dither</label>
+      <select id="dither">
+        <option value="tone">Tone (inspo strip)</option>
+        <option value="atkinson" selected>Atkinson (clean)</option>
+        <option value="floyd">Floyd-Steinberg (detail)</option>
+        <option value="bayer8">Bayer 8×8</option>
+        <option value="bayer4">Bayer 4×4</option>
+        <option value="threshold">Threshold</option>
+      </select>
+      <div class="row" id="threshold-row" style="margin-top:6px; display:none;">
+        <span style="font-size:11px;color:var(--muted);width:60px">Threshold</span>
+        <input type="range" id="threshold" min="0" max="255" step="1" value="128">
+        <span class="val" id="threshold-val">128</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <label>Tone</label>
+      <div class="row">
+        <span style="font-size:11px;color:var(--muted);width:60px">Bright</span>
+        <input type="range" id="brightness" min="0.3" max="2.5" step="0.05" value="1.15">
+        <span class="val" id="brightness-val">1.15</span>
+      </div>
+      <div class="row">
+        <span style="font-size:11px;color:var(--muted);width:60px">Contrast</span>
+        <input type="range" id="contrast" min="0.3" max="2.5" step="0.05" value="1.05">
+        <span class="val" id="contrast-val">1.05</span>
+      </div>
+      <div class="row">
+        <span style="font-size:11px;color:var(--muted);width:60px">Gamma</span>
+        <input type="range" id="gamma" min="0.3" max="3.0" step="0.05" value="1.0">
+        <span class="val" id="gamma-val">1.00</span>
+      </div>
+      <div class="row checkbox" style="margin-top:8px;">
+        <input type="checkbox" id="invert"><label for="invert" style="text-transform:none;margin:0;color:var(--ink);font-size:13px;">Invert</label>
+      </div>
+    </div>
+
+    <details>
+      <summary>Presets</summary>
+      <div class="swatch" style="margin-top:6px;">
+        <button data-preset="photo">Photo</button>
+        <button data-preset="bluesky">Blue sky</button>
+        <button data-preset="pixelart">Pixel art</button>
+        <button data-preset="reset">Reset</button>
+      </div>
+    </details>
+
+    <div class="actions">
+      <button id="dl">Download PNG</button>
+      <button id="dl2x" class="secondary">…@2×</button>
+    </div>
+  </div>
+
+  <div class="preview">
+    <div class="canvas-wrap">
+      <canvas id="out"></canvas>
+    </div>
+    <div class="meta" id="out-meta">load an image →</div>
+    <details>
+      <summary>Source thumbnail</summary>
+      <div style="margin-top:8px;"><img id="thumb" class="source-thumb" alt=""></div>
+    </details>
+  </div>
+</div>
+
+<script>
+// ---------- dither tables ------------------------------------------------
+const BAYER4 = [
+  [ 0,  8,  2, 10],
+  [12,  4, 14,  6],
+  [ 3, 11,  1,  9],
+  [15,  7, 13,  5],
+];
+const BAYER8 = [
+  [ 0, 32,  8, 40,  2, 34, 10, 42],
+  [48, 16, 56, 24, 50, 18, 58, 26],
+  [12, 44,  4, 36, 14, 46,  6, 38],
+  [60, 28, 52, 20, 62, 30, 54, 22],
+  [ 3, 35, 11, 43,  1, 33,  9, 41],
+  [51, 19, 59, 27, 49, 17, 57, 25],
+  [15, 47,  7, 39, 13, 45,  5, 37],
+  [63, 31, 55, 23, 61, 29, 53, 21],
+];
+// Same tone tiles as pixelize.py — 9 levels, 4x4 each.
+const TONE_TILES = [
+  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],     // 0%
+  [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],     // 12%
+  [1,0,0,0, 0,0,1,0, 0,0,0,0, 0,1,0,0],     // 25%
+  [1,0,1,0, 0,0,0,0, 1,0,1,0, 0,1,0,1],     // 37%
+  [1,0,1,0, 0,1,0,1, 1,0,1,0, 0,1,0,1],     // 50%
+  [1,1,1,1, 1,0,1,0, 1,1,1,1, 1,0,1,0],     // 62%
+  [1,1,1,1, 1,1,0,1, 1,1,1,1, 1,0,1,1],     // 75%
+  [1,1,1,1, 1,1,1,1, 1,1,0,1, 1,1,1,1],     // 87%
+  [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],     // 100%
+];
+
+// ---------- state --------------------------------------------------------
+const state = {
+  img: null,
+  size: [400, 240],
+  fit: "cover",
+  cropX: 0.5, cropY: 0.5,
+  dither: "atkinson",
+  threshold: 128,
+  brightness: 1.15, contrast: 1.05, gamma: 1.0,
+  invert: false,
+};
+
+// ---------- fit & resize -------------------------------------------------
+function fittedCanvas(img, [tw, th], fit, cropX, cropY) {
+  const c = document.createElement("canvas");
+  c.width = tw; c.height = th;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  const sw = img.naturalWidth, sh = img.naturalHeight;
+  if (fit === "stretch") {
+    ctx.drawImage(img, 0, 0, tw, th);
+    return c;
+  }
+  const srcRatio = sw / sh, dstRatio = tw / th;
+  if (fit === "cover") {
+    let newW, newH;
+    if (srcRatio > dstRatio) { newH = th; newW = Math.round(sw * th / sh); }
+    else                     { newW = tw; newH = Math.round(sh * tw / sw); }
+    const dx = Math.round((newW - tw) * Math.max(0, Math.min(1, cropX)));
+    const dy = Math.round((newH - th) * Math.max(0, Math.min(1, cropY)));
+    ctx.drawImage(img, 0, 0, sw, sh, -dx, -dy, newW, newH);
+    return c;
+  }
+  if (fit === "contain") {
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, tw, th);
+    let newW, newH;
+    if (srcRatio > dstRatio) { newW = tw; newH = Math.round(sh * tw / sw); }
+    else                     { newH = th; newW = Math.round(sw * th / sh); }
+    ctx.drawImage(img, 0, 0, sw, sh, (tw - newW) >> 1, (th - newH) >> 1, newW, newH);
+    return c;
+  }
+  return c;
+}
+
+// ---------- luma & adjustments ------------------------------------------
+function toLuma(canvas, opts) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const { width: w, height: h } = canvas;
+  const im = ctx.getImageData(0, 0, w, h);
+  const data = im.data;
+  const luma = new Uint8ClampedArray(w * h);
+  // Gamma LUT
+  let gammaLUT = null;
+  if (opts.gamma !== 1.0) {
+    gammaLUT = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) {
+      gammaLUT[i] = Math.round(255 * Math.pow(i / 255, 1 / opts.gamma));
+    }
+  }
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    // Composite over grey 128 by alpha
+    const a = data[i+3] / 255;
+    const r = data[i]   * a + 128 * (1 - a);
+    const g = data[i+1] * a + 128 * (1 - a);
+    const b = data[i+2] * a + 128 * (1 - a);
+    let v = (r * 77 + g * 150 + b * 29) >> 8;          // Rec.601 luma
+    v = v * opts.brightness;                            // brightness
+    v = (v - 128) * opts.contrast + 128;                // contrast
+    v = Math.max(0, Math.min(255, Math.round(v)));
+    if (gammaLUT) v = gammaLUT[v];
+    luma[p] = v;
+  }
+  return luma;
+}
+
+// ---------- dithers ------------------------------------------------------
+function dither(luma, w, h, mode, threshold) {
+  const out = new Uint8Array(w * h);  // 0 or 1
+  if (mode === "threshold") {
+    for (let i = 0; i < luma.length; i++) out[i] = luma[i] >= threshold ? 1 : 0;
+    return out;
+  }
+  if (mode === "bayer4" || mode === "bayer8") {
+    const m = mode === "bayer4" ? BAYER4 : BAYER8;
+    const sz = m.length;
+    const thresh = new Uint8Array(sz * sz);
+    for (let y = 0; y < sz; y++)
+      for (let x = 0; x < sz; x++)
+        thresh[y * sz + x] = Math.floor((m[y][x] + 0.5) * 255 / (sz * sz));
+    for (let y = 0; y < h; y++) {
+      const ty = y % sz;
+      for (let x = 0; x < w; x++) {
+        out[y * w + x] = luma[y * w + x] >= thresh[ty * sz + (x % sz)] ? 1 : 0;
+      }
+    }
+    return out;
+  }
+  if (mode === "tone") {
+    const N = TONE_TILES.length, step = 256 / N;
+    for (let y = 0; y < h; y++) {
+      const row = y & 3;
+      for (let x = 0; x < w; x++) {
+        const v = luma[y * w + x];
+        const lvl = Math.min(N - 1, Math.floor(v / step));
+        out[y * w + x] = TONE_TILES[lvl][row * 4 + (x & 3)];
+      }
+    }
+    return out;
+  }
+  // Error diffusion — operate on a mutable Int16 buffer
+  const buf = new Int16Array(luma);
+  if (mode === "atkinson") {
+    const offsets = [[1,0],[2,0],[-1,1],[0,1],[1,1],[0,2]];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x;
+        const v = Math.max(0, Math.min(255, buf[idx]));
+        const nv = v >= 128 ? 255 : 0;
+        out[idx] = nv ? 1 : 0;
+        const err = (v - nv) >> 3;  // /8
+        for (const [dx, dy] of offsets) {
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && nx < w && ny >= 0 && ny < h) buf[ny * w + nx] += err;
+        }
+      }
+    }
+    return out;
+  }
+  if (mode === "floyd") {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x;
+        const v = Math.max(0, Math.min(255, buf[idx]));
+        const nv = v >= 128 ? 255 : 0;
+        out[idx] = nv ? 1 : 0;
+        const err = v - nv;
+        if (x + 1 < w)             buf[idx + 1]       += (err * 7) >> 4;
+        if (y + 1 < h) {
+          if (x > 0)               buf[idx + w - 1]   += (err * 3) >> 4;
+                                   buf[idx + w]       += (err * 5) >> 4;
+          if (x + 1 < w)           buf[idx + w + 1]   += err >> 4;
+        }
+      }
+    }
+    return out;
+  }
+  return out;
+}
+
+// ---------- pipeline -----------------------------------------------------
+function render() {
+  if (!state.img) return;
+  const fitted = fittedCanvas(state.img, state.size, state.fit, state.cropX, state.cropY);
+  const w = fitted.width, h = fitted.height;
+  const luma = toLuma(fitted, state);
+  const bits = dither(luma, w, h, state.dither, state.threshold);
+  // Produce output ImageData
+  const out = document.getElementById("out");
+  out.width = w; out.height = h;
+  const octx = out.getContext("2d");
+  const im = octx.createImageData(w, h);
+  for (let i = 0; i < bits.length; i++) {
+    const v = state.invert ? (bits[i] ? 0 : 255) : (bits[i] ? 255 : 0);
+    im.data[i*4]   = v;
+    im.data[i*4+1] = v;
+    im.data[i*4+2] = v;
+    im.data[i*4+3] = 255;
+  }
+  octx.putImageData(im, 0, 0);
+  // Scale up the on-screen view so tiny sprites are visible
+  const scale = w <= 64 ? 8 : w <= 128 ? 4 : 2;
+  out.style.width  = (w * scale) + "px";
+  out.style.height = (h * scale) + "px";
+  document.getElementById("out-meta").textContent =
+    `${w}×${h} · ${state.dither} · view ${scale}×`;
+}
+
+// ---------- UI wiring ----------------------------------------------------
+function setSize(spec) {
+  document.querySelectorAll("#size-swatch button").forEach(b => b.classList.toggle("on", b.dataset.size === spec));
+  const custom = document.getElementById("size-custom");
+  custom.classList.toggle("shown", spec === "custom");
+  if (spec === "full")    state.size = [400, 240];
+  else if (spec === "32") state.size = [32, 32];
+  else if (spec === "16") state.size = [16, 16];
+  else if (spec === "custom") {
+    state.size = [+document.getElementById("size-w").value || 400,
+                  +document.getElementById("size-h").value || 240];
+  }
+  render();
+}
+function setFit(f) {
+  state.fit = f;
+  document.querySelectorAll("#fit-swatch button").forEach(b => b.classList.toggle("on", b.dataset.fit === f));
+  render();
+}
+function bindSlider(id, key, fmt = v => v.toFixed(2)) {
+  const el = document.getElementById(id);
+  const val = document.getElementById(id + "-val");
+  el.addEventListener("input", () => {
+    state[key] = +el.value;
+    val.textContent = fmt(+el.value);
+    render();
+  });
+  val.textContent = fmt(+el.value);
+}
+bindSlider("crop-x", "cropX");
+bindSlider("crop-y", "cropY");
+bindSlider("brightness", "brightness");
+bindSlider("contrast", "contrast");
+bindSlider("gamma", "gamma");
+bindSlider("threshold", "threshold", v => String(v|0));
+
+document.getElementById("dither").addEventListener("change", e => {
+  state.dither = e.target.value;
+  document.getElementById("threshold-row").style.display = state.dither === "threshold" ? "" : "none";
+  render();
+});
+document.getElementById("invert").addEventListener("change", e => {
+  state.invert = e.target.checked;
+  render();
+});
+document.querySelectorAll("#size-swatch button").forEach(b => b.addEventListener("click", () => setSize(b.dataset.size)));
+document.querySelectorAll("#fit-swatch button").forEach(b => b.addEventListener("click", () => setFit(b.dataset.fit)));
+document.getElementById("size-w").addEventListener("input", () => setSize("custom"));
+document.getElementById("size-h").addEventListener("input", () => setSize("custom"));
+
+// Presets
+const PRESETS = {
+  photo:    { brightness: 1.15, contrast: 1.05, gamma: 1.0, dither: "atkinson" },
+  bluesky:  { brightness: 1.35, contrast: 1.15, gamma: 1.0, dither: "atkinson" },
+  pixelart: { brightness: 1.0,  contrast: 1.0,  gamma: 1.0, dither: "bayer4"  },
+  reset:    { brightness: 1.0,  contrast: 1.0,  gamma: 1.0, dither: "atkinson", cropX: 0.5, cropY: 0.5, invert: false },
+};
+document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
+  const p = PRESETS[b.dataset.preset];
+  Object.assign(state, p);
+  // Sync UI
+  for (const k of ["brightness","contrast","gamma","cropX","cropY"]) {
+    if (k in p) {
+      const id = k === "cropX" ? "crop-x" : k === "cropY" ? "crop-y" : k;
+      const el = document.getElementById(id);
+      el.value = state[k];
+      document.getElementById(id + "-val").textContent = (+el.value).toFixed(2);
+    }
+  }
+  if ("dither" in p) {
+    document.getElementById("dither").value = p.dither;
+    document.getElementById("threshold-row").style.display = p.dither === "threshold" ? "" : "none";
+  }
+  if ("invert" in p) document.getElementById("invert").checked = p.invert;
+  render();
+}));
+
+// File / drop
+const drop = document.getElementById("drop");
+const fileInput = document.getElementById("file");
+drop.addEventListener("click", () => fileInput.click());
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("hover"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("hover"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("hover");
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener("change", e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+function loadFile(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    state.img = img;
+    state._name = file.name.replace(/\.[^.]+$/, "");
+    document.getElementById("thumb").src = url;
+    const info = document.getElementById("src-info");
+    info.style.display = "";
+    document.getElementById("src-dims").textContent =
+      `${img.naturalWidth}×${img.naturalHeight} · ${(img.naturalWidth/img.naturalHeight).toFixed(2)}:1`;
+    render();
+  };
+  img.src = url;
+}
+
+// Download
+function downloadCanvas(scale) {
+  const out = document.getElementById("out");
+  if (!out.width) return;
+  let target = out;
+  if (scale !== 1) {
+    target = document.createElement("canvas");
+    target.width = out.width * scale;
+    target.height = out.height * scale;
+    const ctx = target.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(out, 0, 0, target.width, target.height);
+  }
+  target.toBlob(blob => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    const name = state._name || "pixelize";
+    a.download = `${name}_${out.width}x${out.height}${scale > 1 ? `@${scale}x` : ""}_${state.dither}.png`;
+    a.click();
+  }, "image/png");
+}
+document.getElementById("dl").addEventListener("click", () => downloadCanvas(1));
+document.getElementById("dl2x").addEventListener("click", () => downloadCanvas(4));
+</script>
+</body>
+</html>

@@ -241,22 +241,18 @@ static void draw_snake(int bx, int by)
 }
 
 // ---------------------------------------------------------------------------
-// Dispatcher — uses the loaded 1-bit sprite (16×16) drawn at 2× when an
-// image asset is present for this pet; falls through to the procedural
-// alpine art below if none was loaded. The png-backed path is the default
-// look; procedural is the safety net for missing assets.
+// Dispatcher — uses the loaded 1-bit sprite (32×32 native) when an image
+// asset is present for this pet; falls through to the procedural alpine
+// art below if none was loaded. The png-backed path is the default look;
+// procedural is the safety net for pets without art (e.g. Reine's bell).
 // ---------------------------------------------------------------------------
 void draw_creature(uint8_t petId, int bx, int by)
 {
     LCDBitmap* sprite = image_pet(petId);
     if (sprite) {
-        // Kenney 1-bit pack ships sprites as WHITE-on-transparent (for use on
-        // a dark UI). Playdate's screen is white, so we flip the bitmap at
-        // draw time with kDrawModeInverted — transparent pixels stay clear,
-        // sprite body becomes black.
-        pd->graphics->setDrawMode(kDrawModeInverted);
-        pd->graphics->drawScaledBitmap(sprite, bx, by, 2.0f, 2.0f);
-        pd->graphics->setDrawMode(kDrawModeCopy);
+        // Our pipeline ships sprites as BLACK-on-transparent — blit straight
+        // onto the canvas; the alpha mask keeps the background clean.
+        pd->graphics->drawBitmap(sprite, bx, by, kBitmapUnflipped);
         return;
     }
     switch (petId) {
@@ -303,11 +299,9 @@ void draw_creature_xform(uint8_t petId, int cx, int cy, float scale,
 {
     LCDBitmap* sprite = image_pet(petId);
     if (sprite) {
-        float s = scale * 2.0f;        // 16×16 source → 32×32 footprint at scale=1
-        pd->graphics->setDrawMode(kDrawModeInverted);
+        // 32×32 native sprite, black-on-transparent — blit at unit scale.
         pd->graphics->drawRotatedBitmap(sprite, cx, cy, deg, 0.5f, 0.5f,
-                                        flip ? -s : s, s);
-        pd->graphics->setDrawMode(kDrawModeCopy);
+                                        flip ? -scale : scale, scale);
         return;
     }
     LCDBitmap* bmp = pd->graphics->newBitmap(32, 32, kColorWhite);

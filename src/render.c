@@ -431,6 +431,19 @@ void render_alpine_bg(int horizonY)
     fill_pat(0, SCREEN_H - 14, SCREEN_W, 14, PAT_GRASS);
 }
 
+// Text with a 1px white halo — same trick as ui.c's draw_text_halo but local
+// so we don't expose a cross-file dependency.
+static void draw_text_halo_battle(const char* s, LCDFont* font, int x, int y) {
+    if (font) pd->graphics->setFont(font);
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    for (int ox = -1; ox <= 1; ox++)
+        for (int oy = -1; oy <= 1; oy++)
+            pd->graphics->drawText(s, strlen(s), kASCIIEncoding, x + ox, y + oy);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
+    pd->graphics->drawText(s, strlen(s), kASCIIEncoding, x, y);
+    pd->graphics->setDrawMode(kDrawModeCopy);
+}
+
 // ---------------------------------------------------------------------------
 // Top bar (turn / gold / lives / wins)
 // ---------------------------------------------------------------------------
@@ -1142,6 +1155,20 @@ void render_battle_screen(void)
 {
     render_alpine_bg(80);
     render_topbar();
+
+    // Team names — player left, enemy right — anchored just under the topbar.
+    // Same draw in pre-battle and battle so they don't pop in/out.
+    {
+        char nameBuf[40];
+        team_name_str(game.playerName.adj, game.playerName.noun,
+                      nameBuf, sizeof(nameBuf));
+        draw_text_halo_battle(nameBuf, game.fontBold, 8, 30);
+        team_name_str(game.enemyName.adj, game.enemyName.noun,
+                      nameBuf, sizeof(nameBuf));
+        int ew = pd->graphics->getTextWidth(game.fontBold, nameBuf, strlen(nameBuf),
+                                            kASCIIEncoding, 0);
+        draw_text_halo_battle(nameBuf, game.fontBold, SCREEN_W - ew - 8, 30);
+    }
 
     float t = 0.0f;
     BattleEvent* e = battle_cur_event(&t);

@@ -3,11 +3,15 @@
 
 static LCDBitmap* g_petBmp[PET_COUNT];
 static LCDBitmap* g_foodBmp[FOOD_COUNT];
+static LCDBitmap* g_titleBg;
+static LCDBitmap* g_nameBg;
 
 void images_init(void)
 {
     for (int i = 0; i < PET_COUNT; i++) g_petBmp[i] = NULL;
     for (int i = 0; i < FOOD_COUNT; i++) g_foodBmp[i] = NULL;
+    g_titleBg = NULL;
+    g_nameBg = NULL;
 
     // Load pets if PNG assets are present (Source/images/pets/pet_NN.png).
     // Indirection through PETS[i].spriteId lets the roster swap which sprite
@@ -26,7 +30,11 @@ void images_init(void)
         snprintf(path, sizeof(path), "images/food/food_%02d", i);
         g_foodBmp[i] = pd->graphics->loadBitmap(path, &err);
     }
+    g_titleBg = pd->graphics->loadBitmap("images/title_bg", &err);
+    g_nameBg  = pd->graphics->loadBitmap("images/name_bg",  &err);
 }
 
 LCDBitmap* image_pet(uint8_t id)  { return id < PET_COUNT  ? g_petBmp[id]  : NULL; }
 LCDBitmap* image_food(uint8_t id) { return id < FOOD_COUNT ? g_foodBmp[id] : NULL; }
+LCDBitmap* image_title_bg(void)   { return g_titleBg; }
+LCDBitmap* image_name_bg(void)    { return g_nameBg; }

@@ -14,7 +14,8 @@ endif
 
 SRC = src/main.c src/game.c src/render.c src/images.c src/pets.c \
       src/triggers.c src/shop.c src/battle.c src/ai.c src/ui.c \
-      src/sound.c src/save.c src/selftest.c src/creatures.c
+      src/sound.c src/save.c src/selftest.c src/creatures.c \
+      src/names.c
 
 UINCDIR = src
 

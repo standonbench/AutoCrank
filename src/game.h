@@ -7,6 +7,7 @@
 #include "pd_api.h"
 #include "debug.h"
 #include "mathutil.h"
+#include "names.h"
 
 // ---------------------------------------------------------------------------
 // Global Playdate API pointer (set once in eventHandler)
@@ -80,6 +81,8 @@ typedef enum {
     STATE_VICTORY,
     STATE_SELFTEST,
     STATE_GALLERY,
+    STATE_TEAM_NAME,
+    STATE_HALL_OF_FAME,
 } GameState;
 
 // ---------------------------------------------------------------------------
@@ -98,6 +101,23 @@ typedef struct {
 typedef struct {
     PetSlot slots[TEAM_SIZE];
 } Team;
+
+// Team name: indices into NAME_ADJECTIVES / NAME_NOUNS (names.h).
+typedef struct {
+    uint8_t adj;
+    uint8_t noun;
+} TeamName;
+
+// One slot in the Hall of Fame: snapshot of a winning team + its name + the
+// turn it crossed the 10-win line. Persisted in save data.
+#define HOF_SIZE 16
+typedef struct {
+    uint8_t  pets[TEAM_SIZE];     // pet id per slot (0xFF empty)
+    uint8_t  levels[TEAM_SIZE];   // pet level per slot
+    uint8_t  turn;                // turn count when the run was won
+    TeamName name;
+    uint8_t  used;                // 1 if this slot holds a real record
+} WinRecord;
 
 typedef struct {
     uint8_t pets[MAX_SHOP_PETS];   // pet ids, EMPTY_PET = sold/empty
@@ -223,6 +243,26 @@ typedef struct {
     uint32_t runSeed;
     Team     player;
     Shop     shop;
+    TeamName playerName;
+    TeamName enemyName;          // refreshed each round in ai_generate_opponent
+
+    // Hall of Fame — ring of last HOF_SIZE 10-win runs. hofNext is the
+    // write head; hofCount caps at HOF_SIZE.
+    WinRecord hof[HOF_SIZE];
+    uint8_t   hofCount;
+    uint8_t   hofNext;
+
+    // STATE_TEAM_NAME UI: 3 random adj/noun choices and the cursor / picks.
+    uint8_t  nameAdjChoices[3];
+    uint8_t  nameNounChoices[3];
+    uint8_t  nameAdjPick;        // 0..2 — cursor column when in adj row
+    uint8_t  nameNounPick;       // 0..2 — cursor column when in noun row
+    uint8_t  nameRow;            // 0 = adj row, 1 = noun row
+    uint8_t  nameAdjConfirmed;   // 1 if A was pressed on this row's pick
+    uint8_t  nameNounConfirmed;
+
+    // STATE_HALL_OF_FAME UI: which entry is highlighted.
+    uint8_t  hofCursor;
 
     // shop UI
     uint8_t  cursor;             // index into shop+team flat selection
@@ -248,7 +288,7 @@ typedef struct {
     uint32_t frameCount;
     uint16_t titleBlinkTimer;
     uint16_t preBattleTimer;
-    uint8_t  titleCursor;        // title-screen signpost selection (0..2)
+    uint8_t  titleCursor;        // title-screen signpost selection (0..3)
     uint8_t  shopRollAnim;       // countdown timer for the roll-sweep visual
     int8_t   lastGoldDelta;      // signed gold change for the topbar flash
     uint8_t  goldFxFrames;       // countdown for the gold-counter flash
@@ -271,6 +311,8 @@ void game_after_battle(void);
 void images_init(void);
 LCDBitmap* image_pet(uint8_t id);
 LCDBitmap* image_food(uint8_t id);
+LCDBitmap* image_title_bg(void);
+LCDBitmap* image_name_bg(void);
 
 // render.c
 void render_topbar(void);
@@ -357,6 +399,19 @@ void selftest_render(void);
 
 // ui.c gallery
 void ui_gallery_render(void);
+
+// ui.c team-name picker
+void ui_team_name_enter(void);
+void ui_team_name_update(void);
+void ui_team_name_render(void);
+
+// ui.c hall of fame
+void ui_hof_enter(void);
+void ui_hof_update(void);
+void ui_hof_render(void);
+
+// game.c — record a 10-win run into the Hall of Fame ring buffer.
+void hof_record_win(void);
 
 // creatures.c
 void draw_creature(uint8_t petId, int bx, int by);

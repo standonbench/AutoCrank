@@ -1,6 +1,12 @@
 build/
 AutoCrank.pdx/
+AutoCrank.pdx.zip
 Source/pdex.dylib
 Source/pdex.elf
 Source/pdex.bin
 .DS_Store
+
+# Sprite pipeline scratch outputs (regeneratable from sources)
+tools/out/
+tools/test_output/
+tools/.venv/
