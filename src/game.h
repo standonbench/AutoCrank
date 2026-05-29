@@ -62,6 +62,10 @@ extern PlaydateAPI* pd;
 #define MAX_PET_LEVEL    3
 #define STAT_CAP         50
 
+// Player settings — bitfield in game.settings, persisted in save (V5+).
+#define SETTING_SFX_MUTE  0x01   // sound effects muted via the system menu
+#define SETTING_HELP_SEEN 0x02   // how-to-play has been shown once
+
 // Deep SOB chains (Reine|Ibex|Reine|Ibex|Bernard) can generate hundreds of
 // cascading ABILITY/DAMAGE events. 256 was tight enough to truncate playback
 // on stressed late-game boards; 1024 has 3 KB RAM cost and headroom to spare.
@@ -330,6 +334,7 @@ typedef struct {
     uint8_t  shopRollAnim;       // countdown timer for the roll-sweep visual
     int8_t   lastGoldDelta;      // signed gold change for the topbar flash
     uint8_t  goldFxFrames;       // countdown for the gold-counter flash
+    uint8_t  settings;           // SETTING_* bitfield (persisted in save V5)
 } Game;
 
 extern Game game;

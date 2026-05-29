@@ -43,6 +43,7 @@ void sound_init(void)
 
 // note frequency helper
 static void play(PDSynth* s, float hz, float vol, float len) {
+    if (game.settings & SETTING_SFX_MUTE) return;   // player muted SFX
     if (s) pd->sound->synth->playNote(s, hz, vol, len, 0);
 }
 

@@ -58,6 +58,18 @@ static void menu_toggle_debug(void* userdata) {
 static PDMenuItem* g_mPreset = NULL;
 static PDMenuItem* g_mCheat  = NULL;
 static PDMenuItem* g_mPreview = NULL;
+static PDMenuItem* g_mSound  = NULL;
+
+// Player-facing setting: toggle SFX. Checked = sound on. Persists to save.
+static void menu_sound_toggle(void* userdata) {
+    (void)userdata;
+    if (!g_mSound) return;
+    if (pd->system->getMenuItemValue(g_mSound))
+        game.settings &= (uint8_t)~SETTING_SFX_MUTE;   // checked -> sound on
+    else
+        game.settings |= SETTING_SFX_MUTE;             // unchecked -> muted
+    save_write();
+}
 
 static void menu_team_preset(void* userdata) {
     (void)userdata;
@@ -172,6 +184,10 @@ static void menu_preview_jump(void* userdata) {
 }
 
 static void register_debug_menu(void) {
+    // Player-facing first: Sound on/off (checked = on), reflecting saved state.
+    g_mSound = pd->system->addCheckmarkMenuItem(
+        "Sound", (game.settings & SETTING_SFX_MUTE) ? 0 : 1, menu_sound_toggle, NULL);
+
     pd->system->addCheckmarkMenuItem("Debug Overlay", 0, menu_toggle_debug, NULL);
 
     static const char* presetTitles[DBG_PRESET_COUNT];

@@ -1,6 +1,6 @@
 #include "game.h"
 
-#define SAVE_VERSION 4     // bumped: + team names + hall of fame
+#define SAVE_VERSION 5     // bumped: + settings byte (sound, help-seen)
 
 typedef struct __attribute__((packed)) {
     uint32_t version;
@@ -19,6 +19,30 @@ typedef struct __attribute__((packed)) {
     Team     player;
     Shop     shop;
     // V4 additions
+    TeamName  playerName;
+    WinRecord hof[HOF_SIZE];
+    uint8_t   hofCount;
+    uint8_t   hofNext;
+    // V5 addition
+    uint8_t   settings;
+} SaveDataV5;
+
+// V4 layout — the previous format, kept so V4 saves still load (settings = 0).
+typedef struct __attribute__((packed)) {
+    uint32_t version;
+    uint32_t totalRuns;
+    uint32_t totalWins;
+    uint32_t bestStreak;
+    uint8_t  unlockedPets[4];
+    uint8_t  petMaxLevel[PET_COUNT];
+    uint8_t  petWinsAtMax[PET_COUNT];
+    uint8_t  inRun;
+    uint8_t  turn;
+    uint8_t  wins;
+    uint8_t  lives;
+    uint32_t runSeed;
+    Team     player;
+    Shop     shop;
     TeamName  playerName;
     WinRecord hof[HOF_SIZE];
     uint8_t   hofCount;
@@ -57,6 +81,7 @@ static void save_set_defaults(void) {
     memset(game.hof, 0, sizeof(game.hof));
     game.hofCount = 0;
     game.hofNext = 0;
+    game.settings = 0;
 }
 
 void save_load(void) {
@@ -70,7 +95,34 @@ void save_load(void) {
     pd->file->read(f, &ver, sizeof(ver));
     pd->file->seek(f, 0, SEEK_SET);
 
-    if (ver == 4) {
+    if (ver == 5) {
+        SaveDataV5 d;
+        int n = pd->file->read(f, &d, sizeof(d));
+        pd->file->close(f);
+        if (n == (int)sizeof(d)) {
+            game.totalRuns = d.totalRuns;
+            game.totalWins = d.totalWins;
+            game.bestStreak = d.bestStreak;
+            memcpy(game.unlockedPets, d.unlockedPets, sizeof(d.unlockedPets));
+            memcpy(game.petMaxLevel,  d.petMaxLevel,  sizeof(d.petMaxLevel));
+            memcpy(game.petWinsAtMax, d.petWinsAtMax, sizeof(d.petWinsAtMax));
+            game.inRun = d.inRun != 0;
+            game.turn = d.turn;
+            game.wins = d.wins;
+            game.lives = d.lives;
+            game.runSeed = d.runSeed;
+            game.player = d.player;
+            game.shop = d.shop;
+            game.playerName = d.playerName;
+            memcpy(game.hof, d.hof, sizeof(d.hof));
+            game.hofCount = d.hofCount;
+            game.hofNext  = d.hofNext;
+            game.settings = d.settings;
+            DLOG("Save v5 loaded. runs=%u wins=%u hof=%u",
+                 game.totalRuns, game.totalWins, game.hofCount);
+            return;
+        }
+    } else if (ver == 4) {
         SaveDataV4 d;
         int n = pd->file->read(f, &d, sizeof(d));
         pd->file->close(f);
@@ -92,8 +144,9 @@ void save_load(void) {
             memcpy(game.hof, d.hof, sizeof(d.hof));
             game.hofCount = d.hofCount;
             game.hofNext  = d.hofNext;
-            DLOG("Save v4 loaded. runs=%u wins=%u hof=%u",
-                 game.totalRuns, game.totalWins, game.hofCount);
+            game.settings = 0;          // V4 -> V5: default (sound on, help unseen)
+            DLOG("Save v4 -> v5 migrated. runs=%u wins=%u",
+                 game.totalRuns, game.totalWins);
             return;
         }
     } else if (ver == 3) {
@@ -115,7 +168,7 @@ void save_load(void) {
             game.runSeed = d.runSeed;
             game.player = d.player;
             game.shop = d.shop;
-            DLOG("Save v3 -> v4 migrated. runs=%u wins=%u",
+            DLOG("Save v3 -> v5 migrated. runs=%u wins=%u",
                  game.totalRuns, game.totalWins);
             return;
         }
@@ -126,7 +179,7 @@ void save_load(void) {
 }
 
 void save_write(void) {
-    SaveDataV4 d;
+    SaveDataV5 d;
     memset(&d, 0, sizeof(d));
     d.version = SAVE_VERSION;
     d.totalRuns = game.totalRuns;
@@ -146,6 +199,7 @@ void save_write(void) {
     memcpy(d.hof, game.hof, sizeof(d.hof));
     d.hofCount = game.hofCount;
     d.hofNext  = game.hofNext;
+    d.settings = game.settings;
 
     SDFile* f = pd->file->open("save.bin", kFileWrite);
     if (f) {
