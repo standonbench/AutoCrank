@@ -25,6 +25,13 @@ void images_init(void)
         snprintf(path, sizeof(path), "images/pets/pet_%02d",
                  (int)PETS[i].spriteId);
         g_petBmp[i] = pd->graphics->loadBitmap(path, &err);
+        // A missing PNG drops this pet onto the procedural fallback in
+        // draw_creature_xform, which allocates a 32x32 scratch bitmap EVERY
+        // frame it's drawn — a per-frame malloc in the battle hot path. All
+        // 18 ship today, so warn loudly if one ever fails to load.
+        if (!g_petBmp[i])
+            DLOG("WARN: pet %d sprite '%s' missing (%s) — procedural fallback",
+                 i, path, err ? err : "?");
     }
     for (int i = 0; i < FOOD_COUNT; i++) {
         snprintf(path, sizeof(path), "images/food/food_%02d", i);

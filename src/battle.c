@@ -252,6 +252,13 @@ void battle_simulate(void) {
     if (pAlive && !eAlive)      game.battleResult = 0; // win
     else if (!pAlive && eAlive) game.battleResult = 1; // loss
     else                        game.battleResult = 2; // draw
+    // Always land the RESULT terminator, even if a deep cascade filled the
+    // log mid-battle: free the last slot so playback ends on a clean
+    // BEV_RESULT rather than running off the end of a truncated log.
+    // (game.battleResult is computed from final team state above, so the
+    // outcome is correct regardless of whether tail events were dropped.)
+    if (game.battleLogLen >= MAX_BATTLE_EVENTS)
+        game.battleLogLen = MAX_BATTLE_EVENTS - 1;
     battle_log_push(BEV_RESULT, 0, 0, game.battleResult, 0);
 }
 

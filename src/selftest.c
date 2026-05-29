@@ -711,6 +711,72 @@ void selftest_run(void) {
         check("Food schedule: turn 5 reveals T3 foods", sawT3);
     }
 
+    // T46: Truncation safety — a deep copy/snipe cascade still terminates with
+    // a valid result, never overflows the log array, and always ends on a
+    // BEV_RESULT terminator (so playback can't run off the end of a truncated
+    // log). Fox/Deer re-fire Alpaca snipes into 5 tanky Bulls.
+    {
+        PetSlot p[] = { mkL(16,4,4,3), mkL(12,4,4,3), mkL(15,4,4,3),
+                        mkL(12,4,4,3), mkL(16,4,4,3) };
+        PetSlot e[] = { mk(17,1,50), mk(17,1,50), mk(17,1,50),
+                        mk(17,1,50), mk(17,1,50) };
+        run_battle(p, 5, e, 5);
+        bool bounded   = game.battleLogLen <= MAX_BATTLE_EVENTS;
+        bool terminated = game.battleLogLen > 0 &&
+            game.battleLog[game.battleLogLen - 1].kind == BEV_RESULT;
+        check("Truncation: deep cascade bounded + RESULT terminator",
+              bounded && terminated && game.battleResult <= 2);
+    }
+
+    // T47: Determinism — sound playback must NEVER touch the simulation RNG
+    // (_rng_state), or the next battle/shop diverges from its log. Snapshot
+    // the state, fire every SFX, assert it's untouched. (sfx_attack used to
+    // call rng_float; this guards against that class of regression.)
+    {
+        uint32_t before = _rng_state;
+        sfx_attack(); sfx_attack(); sfx_faint();
+        sfx_buy(); sfx_sell(); sfx_roll(); sfx_win(); sfx_lose();
+        check("Determinism: SFX leave sim RNG untouched", _rng_state == before);
+    }
+
+    // T48: Determinism — the same matchup + seed simulates byte-identically
+    // (result, length, and every event), so a saved log replays the same fight.
+    {
+        PetSlot p[] = { mk(4,3,3), mk(6,3,3), mk(11,3,3) };   // summoner-heavy
+        PetSlot e[] = { mk(0,3,3), mk(7,3,3), mk(10,3,3) };
+        rng_seed(0xABCDEF01);
+        run_battle(p, 3, e, 3);
+        int r1 = game.battleResult, n1 = game.battleLogLen;
+        static BattleEvent snap[MAX_BATTLE_EVENTS];
+        for (int i = 0; i < n1; i++) snap[i] = game.battleLog[i];
+        rng_seed(0xABCDEF01);
+        run_battle(p, 3, e, 3);
+        bool same = (r1 == game.battleResult) && (n1 == game.battleLogLen);
+        for (int i = 0; same && i < n1; i++) {
+            BattleEvent* a = &snap[i]; BattleEvent* b = &game.battleLog[i];
+            if (a->kind != b->kind || a->side != b->side || a->slot != b->slot ||
+                a->value != b->value || a->data != b->data) same = false;
+        }
+        check("Determinism: same seed -> identical battle log", same);
+    }
+
+    // T49: Deer/Fox re-fire is attack-order independent (audit guard). T40
+    // covers Fox firing BEFORE its neighbor (Fox atk 4 > Bernard atk 1). Here
+    // Bernard's atk is higher, so it takes its OWN start-of-battle turn first
+    // and Fox re-fires it afterward — the total must still be 1 own + 3
+    // re-fires = 4 snipes, proving the direct-call re-fire never double-counts
+    // regardless of which pet the attack-ordered drain reaches first.
+    {
+        PetSlot p[] = { mkL(16,1,1,3), mk(12,10,80) };   // Fox L3 (low atk), Bernard (high atk)
+        PetSlot e[] = { mk(0,1,200) };                   // tanky soak so every snipe lands
+        run_battle(p, 2, e, 1);
+        int n8 = 0;
+        for (int i = 0; i < game.battleLogLen; i++)
+            if (game.battleLog[i].kind == BEV_ABILITY &&
+                game.battleLog[i].value == 8) n8++;
+        check("Deer/Fox: re-fire count is attack-order independent", n8 == 4);
+    }
+
     DLOG("SELFTEST: %d passed, %d failed", g_pass, g_fail);
 }
 
