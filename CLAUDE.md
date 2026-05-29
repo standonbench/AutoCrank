@@ -1,12 +1,15 @@
 # AutoCrank — Playdate autobattler
 
-A pocket-sized Super Auto Pets-inspired game. Win 10 in a row, lose 5 lives.
+A pocket-sized Super Auto Pets-inspired game, themed as a Swiss-Alpine
+"Combat des Reines." Win 10 battles to take the run; you have 5 lives. Wins
+are cumulative (not a streak — best streak is tracked separately).
 
 ## Build & Run
 ```
 make                    # zero warnings required
 make run                # build + open Simulator
 open AutoCrank.pdx      # launch in Simulator manually
+sh tools/runtests.sh    # headless mechanics self-tests (no Simulator needed)
 ```
 
 Same setup as sibling `CrankSurvivorC/` — `PLAYDATE_SDK_PATH` env or `~/.Playdate/config`.
@@ -20,23 +23,27 @@ Playdate: ARM Cortex-M7, 400×240, 1-bit B/W, 30fps.
 | `src/game.h` | All structs, enums, constants, GFX_* macros, extern decls |
 | `src/game.c` | State machine, top-level update(), shop input handling |
 | `src/main.c` | eventHandler, RNG seed, 30fps lock |
-| `src/render.c` | Pet card, top bar, shop screen, battle screen |
-| `src/images.c` | LCDBitmap loader for pet/food sprites |
+| `src/render.c` | Top bar, shop screen, battle screen + projectile/debris/shake FX |
+| `src/creatures.c` | Procedural 1-bit creature art (fallback when a PNG is missing) |
+| `src/images.c` | LCDBitmap loader for pet sprites (foods are procedural) |
 | `src/pets.c` | 18 pet definitions + ability handlers, 6 food defs |
 | `src/triggers.c` | Trigger event queue + drain in attack-order |
 | `src/shop.c` | Buy/sell/roll/freeze/combine + tier schedule |
 | `src/battle.c` | Two-pass: simulate → event log → animated playback |
-| `src/ai.c` | Opponent team generator, scales with turn |
-| `src/ui.c` | Title, gameover, victory, pre-battle, result screens |
-| `src/save.c` | Versioned save (V1 = lifetime stats + run resume) |
-| `src/sound.c` | SFX stubs (synth implementation pending) |
+| `src/ai.c` | Opponent generator — simulates a competent player's journey |
+| `src/ui.c` | Title, gameover, victory, pre-battle, result, gallery, team-name, hall-of-fame |
+| `src/names.c/.h` | Team-name word pools (`team_name_str`) |
+| `src/save.c` | Versioned save (V4 = lifetime stats + run resume + names + hall of fame) |
+| `src/sound.c` | Synth SFX (implemented). `sfx_attack` is the combat-hit thud |
+| `src/selftest.c` | 56-case mechanics self-test (Title→TEST, or `tools/runtests.sh`) |
 | `src/mathutil.h` | XORShift RNG, clamp helpers |
 | `src/debug.h` | DLOG/ASSERT (off in release) |
+| `tools/hosttest.c` | Host harness: stub `pd` + `main` to run selftest_run() natively |
 
 ## Key Patterns
 - GFX macros: `GFX_FILL`, `GFX_RECT`, `GFX_ELLIPSE`, `GFX_CIRCLE`, `GFX_LINE`, `GFX_PUSH`/`POP`
 - Draw modes: `kDrawModeCopy` (default), `kDrawModeFillWhite` (text on black bars), `kDrawModeInverted` for outline/flash effects (NOT `kDrawModeXOR` — Playdate quirk)
-- State machine: `game.state` — TITLE, SHOP, PRE_BATTLE, BATTLE, RESULT, GAMEOVER, VICTORY
+- State machine: `game.state` — TITLE, SHOP, PRE_BATTLE, BATTLE, RESULT, GAMEOVER, VICTORY, SELFTEST, GALLERY, TEAM_NAME, HALL_OF_FAME
 - One Game struct (`game`) holds everything (lifetime stats, current run, shop, battle)
 - Pre-allocated, no malloc in hot path
 - Shop cursor = single uint8 indexing across rows: shop pets / shop foods / team / [roll, end turn]
@@ -47,17 +54,21 @@ drains events in attack-order, and handlers can push more events — that's how
 synergies cascade (Cricket faints → spawns Zombie → Horse buffs it → Ox gets +atk).
 
 ## Battle two-pass design
-1. `battle_simulate()` runs the whole fight instantly, populating `game.battleLog` (BattleEvent[256]).
+1. `battle_simulate()` runs the whole fight instantly, populating `game.battleLog` (BattleEvent[1024]).
 2. `battle_playback_step()` chews through the log at `crankSpeed × baseRate` events/sec for animation.
-Crank in battle = 1×–8× speed multiplier. A button skips to result.
+Crank in battle = 1×–8× speed multiplier; holding A floors speed to 4× (it does NOT skip).
+Hits render as arcing projectiles + falling debris + a brief screen-shake; all FX use a
+separate `fx_hash` and the playback path NEVER touches the sim `_rng_state` (determinism).
 
 ## Sprite assets
-- Pets: `Source/images/pets/pet_NN.png` (16×16, 1-bit, NN = 00-17). Sourced from Kenney 1-bit pack (CC0).
-- Foods: `Source/images/food/food_NN.png` (16×16, NN = 00-05).
+- Pets: `Source/images/pets/pet_NN.png` (**32×32**, 1-bit, NN = 00-17, Kenney-derived CC0).
+  `PETS[i].spriteId` selects the file; `NO_SPRITE` forces the procedural drawer.
+- Foods: **procedural only** (`render.c` `render_food_*`); `Source/images/food/` is empty.
 - `pdc` auto-converts every PNG in `Source/` into `.pdi` on build.
-- Renderer scales pet sprites 2× to 32×32 in-game.
-- Missing sprites render a stub (letter inside dotted box) — game still works without art.
-- UI / FX are drawn procedurally with GFX macros.
+- Pet sprites blit at native 32×32; the battle screen scales them by `BATTLE_SCALE`.
+- Missing pet PNG → procedural `creatures.c` fallback, which allocates a 32×32 scratch
+  bitmap PER FRAME (off the happy path; `images_init` warns if any sprite fails to load).
+- UI / combat FX are drawn procedurally with GFX macros.
 
 ## Controls
 - D-pad: navigate cursor (up/down switches rows, left/right within row)
@@ -65,7 +76,7 @@ Crank in battle = 1×–8× speed multiplier. A button skips to result.
 - B: freeze on shop slots / sell on team slots
 - Crank (in shop, with team pet picked up): rotate to shift slot
 - Crank (in battle): rotate to fast-forward animation (1×–8×)
-- A (in battle): skip to result
+- A (in battle): hold to floor speed at 4× (does NOT skip to result)
 
 ## SAP-derived numbers
 - Starting gold: 10 per turn
@@ -78,14 +89,22 @@ Crank in battle = 1×–8× speed multiplier. A button skips to result.
 - Lives: 5; Wins to victory: 10
 - Stat cap: 50
 
-## Roster (18 pets, 6 per tier — see plan)
-T1: Mouse, Dog, Frog, Bee, Cricket, Cow
-T2: Sheep, Hedgehog, Horse, Ox, Snake, Spider
-T3: Crocodile, Whale, Boar, Parrot, Tiger, Dragon
+## Roster (18 pets, 6 per tier) — Swiss-Alpine display names
+T1: Squirrel, Pup, Hen, Hedgehog, Rabbit, Calf
+T2: Sheep, Goat, Haflinger, Donkey, Alligator, Duck
+T3: Alpaca, Highland, Boar, Deer, Fox, Bear
+
+**Name-mapping gotcha:** display names in `PETS[]` differ from the handler
+function names, which keep the original prototype names — e.g.
+`pet_mouse_faint` = Squirrel, `pet_dog_summon` = Pup, `pet_croc_sob` = Alpaca,
+`pet_whale_faint` = Highland, `pet_tiger_sob` = Fox, `pet_parrot_sob` = Deer,
+`pet_dragon_buy` = Bear. Some `pets.c` comments use yet a third set
+(Marmot/Bernard/Ibex/Reine/Bull). Same pets — do not rename to "fix" them.
 
 ## Style
 - Procedural UI/FX in CrankSurvivor style (dot eyes, no eyebrows on any procedural sprite)
-- Pet sprites from Kenney 1-bit pack, 16×16 → drawn 2× = 32×32
+- Combat FX are directional (projectiles/debris), not symmetric spoke-bursts (see memory)
+- Pet sprites are 32×32 1-bit PNGs (Kenney-derived); `creatures.c` is the procedural fallback
 
 ## Gotchas
 - LSP errors about `pd_api.h` not found are FALSE POSITIVES — ignore

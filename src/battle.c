@@ -410,8 +410,11 @@ void battle_playback_step(void) {
         if (game.battleClock < dur) break;
         game.battleClock -= dur;
         apply_event(bs, e);
-        if (e->kind == BEV_ATTACK)  sfx_attack();
-        if (e->kind == BEV_FAINT)   sfx_faint();
+        // Faint whoosh on apply. (Combat hits — clash contact + projectile
+        // impact — fire sfx_attack from render.c at the visual moment, since
+        // ability DAMAGE events collapse to a zero-length window here. There
+        // is no BEV_ATTACK event: the front line trades via BEV_CLASH.)
+        if (e->kind == BEV_FAINT) sfx_faint();
         game.battlePlayhead++;
     }
 
