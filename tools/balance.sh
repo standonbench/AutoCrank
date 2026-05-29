@@ -6,9 +6,10 @@
 # of instant battle sims to print the difficulty-curve and per-pet-power
 # reports. No Playdate Simulator required. See tools/balance.c for details.
 #
-# Usage:  sh tools/balance.sh          # both reports
+# Usage:  sh tools/balance.sh          # all reports
 #         sh tools/balance.sh curve    # difficulty curve only
-#         sh tools/balance.sh pets     # per-pet power only
+#         sh tools/balance.sh pets     # per-pet power (random teams) only
+#         sh tools/balance.sh synergy  # archetype round-robin (support decks)
 # ---------------------------------------------------------------------------
 set -e
 cd "$(dirname "$0")/.."

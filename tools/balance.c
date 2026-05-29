@@ -169,6 +169,118 @@ static void balance_pets(void) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Report 3: per-pet power IN A SUPPORT DECK (synergy-aware)
+//
+// The random-team report undersells synergy pets — a buffer with no summoner,
+// a copy/re-fire pet with no SOB neighbor, etc. does nothing. Here each pet is
+// dropped into a hand-picked deck that activates it, then run against a strong
+// stat-ball benchmark. A pet that's weak in random teams but strong here is
+// just synergy-dependent (fine); one that's weak in BOTH is genuinely weak.
+//
+// Partner ids per pet (judgment-based, kept in sync with pets.c abilities).
+// Deer(15, copies LEFT) / Fox(16, re-fires RIGHT) need a neighbour on a side,
+// so their decks are positioned explicitly in supportive_team().
+// ---------------------------------------------------------------------------
+static const int8_t PARTNERS[PET_COUNT][4] = {
+    /*0  Squirrel faint-dmg */ {  7, 13, 14, 12 },
+    /*1  Pup on-summon buff */ {  6,  4, 11,  9 },   // summoners + faint payoff
+    /*2  Hen EOT(shop)      */ { 14, 13, 12,  7 },   // out-of-combat value
+    /*3  Hedgehog SOB +atk  */ {  0,  7,  4, 14 },   // wide team to buff
+    /*4  Rabbit summoner    */ {  1,  8,  9, 14 },   // buffers + faint payoff
+    /*5  Calf buy(shop)     */ { 14, 13, 12,  7 },   // out-of-combat value
+    /*6  Sheep summoner     */ {  1,  8,  9, 14 },
+    /*7  Goat faint-AoE     */ {  0, 13, 14, 12 },
+    /*8  Haflinger on-summon*/ {  6,  4, 11,  9 },
+    /*9  Donkey on-faint    */ {  6,  4,  0,  7 },   // faint-prone allies
+    /*10 Alligator on-atk   */ { 14, 12, 13, 17 },   // many attackers
+    /*11 Duck summoner      */ {  1,  8,  9, 14 },
+    /*12 Alpaca SOB-snipe   */ { 15, 16, 13, 14 },   // copy/re-fire amplify
+    /*13 Highland faint-AoE */ { 14, 12,  7, 17 },
+    /*14 Boar before-atk    */ { 13, 12, 17,  7 },
+    /*15 Deer copy-left     */ { 13, 14, 17,  7 },   // 12 placed to its LEFT
+    /*16 Fox re-fire-right  */ { 13, 14, 17,  7 },   // 12 placed to its RIGHT
+    /*17 Bear buy(shop)     */ { 14, 13, 12,  7 },   // out-of-combat value
+};
+static int is_shop_phase(uint8_t id) { return id == 2 || id == 5 || id == 17; }
+
+static void put(Team* t, int slot, uint8_t id) {
+    const PetDef* d = pet_def(id);
+    t->slots[slot].id = id; t->slots[slot].level = 1;
+    t->slots[slot].atk = d ? d->baseAtk : 1;
+    t->slots[slot].hp  = d ? d->baseHp  : 1;
+    t->slots[slot].food = EMPTY_FOOD; t->slots[slot].flags = 0;
+}
+
+static void supportive_team(Team* t, uint8_t pet) {
+    clear_team(t);
+    if (pet == 15) {                       // Deer copies its LEFT (slot-1) neighbour
+        put(t, 0, 12); put(t, 1, 15);      // Alpaca left of Deer
+        for (int i = 0; i < 3; i++) put(t, 2 + i, (uint8_t)PARTNERS[15][i]);
+    } else if (pet == 16) {                // Fox re-fires its RIGHT (slot+1) neighbour
+        put(t, 0, 16); put(t, 1, 12);      // Alpaca right of Fox
+        for (int i = 0; i < 3; i++) put(t, 2 + i, (uint8_t)PARTNERS[16][i]);
+    } else {
+        put(t, 0, pet);
+        for (int i = 0; i < 4; i++) put(t, 1 + i, (uint8_t)PARTNERS[pet][i]);
+    }
+}
+
+static void jitter(Team* t) {              // +0..1 per stat, samples build variance
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        if (t->slots[i].id == EMPTY_PET) continue;
+        t->slots[i].atk = (int16_t)mini(t->slots[i].atk + rng_range(0, 1), STAT_CAP);
+        t->slots[i].hp  = (int16_t)mini(t->slots[i].hp  + rng_range(0, 1), STAT_CAP);
+    }
+}
+
+static void balance_synergy(void) {
+    // Round-robin the 18 support decks against each other (self-calibrating:
+    // no arbitrary benchmark; field average ~= (1 - draw)/2). Each deck is
+    // headlined by its pet, so the win rate reads as "that archetype vs the
+    // field of archetypes."
+    const int K = 30;                          // iters per ordered pairing
+    Team decks[PET_COUNT];
+    for (int i = 0; i < PET_COUNT; i++) supportive_team(&decks[i], (uint8_t)i);
+    long wins[PET_COUNT] = {0}, games[PET_COUNT] = {0};
+    for (int i = 0; i < PET_COUNT; i++) {
+        for (int j = 0; j < PET_COUNT; j++) {
+            for (int k = 0; k < K; k++) {
+                Team A = decks[i], B = decks[j];
+                jitter(&A); jitter(&B);
+                int r = sim_match(&A, &B);       // A=side0 (deck i), B=side1 (deck j)
+                games[i]++; games[j]++;
+                if (r == 0) wins[i]++; else if (r == 1) wins[j]++;
+            }
+        }
+    }
+    int idx[PET_COUNT];
+    for (int i = 0; i < PET_COUNT; i++) idx[i] = i;
+    for (int i = 0; i < PET_COUNT; i++) {
+        int best = i;
+        for (int j = i + 1; j < PET_COUNT; j++) {
+            double rj = games[idx[j]] ? (double)wins[idx[j]] / games[idx[j]] : 0;
+            double rb = games[idx[best]] ? (double)wins[idx[best]] / games[idx[best]] : 0;
+            if (rj > rb) best = j;
+        }
+        int tmp = idx[i]; idx[i] = idx[best]; idx[best] = tmp;
+    }
+    printf("\n== ARCHETYPE POWER: support-deck round-robin (each pet headlines a deck) ==\n");
+    printf("18 support decks, each vs every other (self-calibrating; field avg ~= 50%% minus\n");
+    printf("draws). ~50%% = an average archetype; well below = weak even in its best deck.\n");
+    printf("(shop) = gold/buff value realised in the shop, not combat — ignore its combat score.\n\n");
+    printf("rank  pet          tier   winRate   note\n");
+    printf("----  -----------  ----   -------   ----\n");
+    for (int k = 0; k < PET_COUNT; k++) {
+        int id = idx[k];
+        const PetDef* d = pet_def((uint8_t)id);
+        double wr = games[id] ? 100.0 * (double)wins[id] / games[id] : 0;
+        printf("%4d  %-11s  T%d     %6.1f%%   %s\n",
+               k + 1, pet_name((uint8_t)id), d ? d->tier : 0, wr,
+               is_shop_phase((uint8_t)id) ? "(shop)" : "");
+    }
+}
+
 int main(int argc, char** argv) {
     g_sys.logToConsole = stub_log;
     g_sys.error        = stub_log;
@@ -179,13 +291,16 @@ int main(int argc, char** argv) {
 
     rng_seed(0xBA1A9CE5);    // fixed seed => reproducible reports
 
-    int doCurve = 1, doPets = 1;
+    int doCurve = 1, doPets = 1, doSyn = 1;
     if (argc > 1) {
-        doCurve = (argv[1][0] == 'c');
-        doPets  = (argv[1][0] == 'p');
-        if (argv[1][0] == 'a') { doCurve = doPets = 1; }
+        char c = argv[1][0];
+        doCurve = (c == 'c');
+        doPets  = (c == 'p');
+        doSyn   = (c == 's');
+        if (c == 'a') { doCurve = doPets = doSyn = 1; }
     }
     if (doCurve) balance_curve();
     if (doPets)  balance_pets();
+    if (doSyn)   balance_synergy();
     return 0;
 }
