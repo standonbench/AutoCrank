@@ -184,6 +184,36 @@ typedef struct {
 } BattleEvent;
 
 // ---------------------------------------------------------------------------
+// Projectile + debris pools for battle FX. Projectiles are spawned at the
+// start of a BEV_ABILITY barrage (one per upcoming BEV_DAMAGE in the same
+// barrage) and arc on a parabola to the target. On landing they spawn
+// debris chunks and a damage popup. Goat L3 + a chained Hedgehog/Edelweiss
+// can fill the pool, so size is generous.
+// ---------------------------------------------------------------------------
+#define MAX_PROJECTILES 16
+#define MAX_DEBRIS      64
+
+typedef struct {
+    int16_t sx, sy;          // launch point (source pet centre)
+    int16_t ex, ey;          // landing point (target pet centre)
+    int16_t age;             // frames since spawn (scaled by battleSpeed)
+    int16_t flightLife;      // frames to land; 0 = inactive slot
+    int16_t popupLife;       // additional frames after landing for damage popup
+    uint8_t side, slot;      // target identity
+    uint8_t damage;          // value to pop on impact
+    uint8_t debrisDone;      // 1 once impact debris has spawned
+} Projectile;
+
+typedef struct {
+    float   x, y;
+    float   vx, vy;
+    uint8_t age;
+    uint8_t life;            // 0 = inactive slot
+    uint8_t size;            // 2..4 px
+    uint8_t pad;
+} Debris;
+
+// ---------------------------------------------------------------------------
 // Pet & food definitions
 // ---------------------------------------------------------------------------
 typedef void (*PetHandler)(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
@@ -281,6 +311,14 @@ typedef struct {
     uint8_t     battleResult;
     uint8_t     battleSpeed;
 
+    // battle FX pools — projectiles + debris from ability/clash impacts.
+    // barrageSpawnedAt = playhead index we last spawned projectiles for
+    // (so the spawn fires exactly once when an ABILITY enters playback);
+    // 0xFFFF means no barrage is currently owned.
+    Projectile  projectiles[MAX_PROJECTILES];
+    Debris      debris[MAX_DEBRIS];
+    uint16_t    barrageSpawnedAt;
+
     // result screen
     uint16_t resultTimer;
 
@@ -321,6 +359,13 @@ void render_shop_screen(void);
 void render_battle_screen(void);
 void render_battle_reset_positions(void);
 void render_battle_reset_slot_position(int side, int slot);
+void projectiles_reset(void);
+
+// Barrage detection — exposed so battle_event_window can collapse
+// subsequent-in-barrage ABILITY/DAMAGE events to zero duration while the
+// first ABILITY of the barrage drives the whole projectile animation.
+bool ability_first_in_barrage(int idx);
+bool damage_in_barrage(int idx);
 
 // Shop layout — exposed so shop.c can anchor popups to the right slot.
 extern const int SHOP_COL_X[3];

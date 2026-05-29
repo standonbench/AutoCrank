@@ -922,6 +922,24 @@ static int unit_target_x(int side, int rank) {
                        : BATTLE_CX + 46 + rank * BATTLE_STEP;
 }
 
+// On-screen X for a unit, robust against the -1 "needs snap" sentinel that
+// g_unitX holds before a slot has first eased in. The easing loop in
+// render_battle_screen normally positions every drawn unit before the
+// projectile spawner runs, but battle-start abilities (Alpaca/Bernard SOB
+// snipes) fire at playhead 0, and the render pipeline could be reordered —
+// so the spawner reads through here and never launches from / aims at x=-1.
+// Fallback derives the slot's rank (front = higher index) the same way the
+// easing loop does and returns its rest position.
+static int battle_slot_x(int side, int slot) {
+    if (side < 0 || side >= 2 || slot < 0 || slot >= TEAM_SIZE) return BATTLE_CX;
+    float x = g_unitX[side][slot];
+    if (x >= 0.0f && x < 2000.0f) return (int)x;
+    int rank = 0;
+    for (int i = TEAM_SIZE - 1; i > slot; i--)
+        if (game.battle.teams[side].slots[i].id != EMPTY_PET) rank++;
+    return unit_target_x(side, rank);
+}
+
 // A floating number with a white halo, rising as t advances.
 static void battle_popup(int cx, int topY, const char* s, float t) {
     int ty = topY - (int)(t * 18.0f);
@@ -957,18 +975,59 @@ static bool clash_kills(int clashIdx, int side, int slot) {
     return false;
 }
 
-// A radial spark-burst at (cx,cy); k = 0..1 progress, fades out by ~0.5.
-static void battle_burst(int cx, int cy, float k) {
-    if (k < 0.0f || k >= 0.5f) return;
-    int r = (int)(9 + k * 80.0f);
-    for (int a = 0; a < 9; a++) {
-        float ang = a * (2.0f * PI_F / 9.0f) + 0.30f;
-        GFX_LINE(cx + (int)(cosf(ang) * r * 0.34f),
-                 cy + (int)(sinf(ang) * r * 0.34f),
-                 cx + (int)(cosf(ang) * r),
-                 cy + (int)(sinf(ang) * r), 3, kColorBlack);
+// Tighter variant: clash kills AND the dying pet has no parting actions
+// queued before its FAINT. Only then is it safe to fly the loser off
+// during the clash window. If parting actions exist (Goat AoE, Mouse
+// death-shot, Edelweiss Bee hatch, an Ox friend-faint buff, etc.) we
+// keep the unit visible as a ghost and defer the fly-off to BEV_FAINT,
+// so the source of the parting effect stays anchored on-screen.
+static bool clash_kills_with_flyoff(int clashIdx, int side, int slot) {
+    if (!clash_kills(clashIdx, side, slot)) return false;
+    for (int i = clashIdx + 1; i < game.battleLogLen; i++) {
+        BattleEvent* e = &game.battleLog[i];
+        if (e->kind == BEV_CLASH || e->kind == BEV_ATTACK) return true;
+        if (e->kind == BEV_FAINT && e->side == side && e->slot == slot)
+            return true;
+        if (e->kind == BEV_SPAWN && e->side == side && e->slot == slot)
+            return true;
+        // Any animatable event between the clash and our FAINT means
+        // there's a parting action to keep us on-screen for.
+        if (e->kind == BEV_ABILITY || e->kind == BEV_DAMAGE ||
+            e->kind == BEV_BUFF) return false;
     }
+    return true;
 }
+
+// True when this slot's pet took lethal damage (hp <= 0) but its BEV_FAINT
+// is still pending further in the log, with at least one animatable event
+// in between. During this "ghost phase" we keep rendering the dying pet at
+// its rank position so on-faint rays/projectiles/buffs read as coming from
+// the actual source, not the survivor easing into its spot.
+static bool slot_in_ghost_phase(int side, int slot) {
+    if (side < 0 || side >= 2 || slot < 0 || slot >= TEAM_SIZE) return false;
+    PetSlot* p = &game.battle.teams[side].slots[slot];
+    if (p->id == EMPTY_PET || p->hp > 0) return false;
+    bool sawIntermediate = false;
+    for (int j = (int)game.battlePlayhead; j < game.battleLogLen; j++) {
+        BattleEvent* e = &game.battleLog[j];
+        if (e->kind == BEV_FAINT && (int)e->side == side &&
+            (int)e->slot == slot) {
+            return sawIntermediate;
+        }
+        // SPAWN replacing this slot ends ghost phase — the new pet
+        // shimmers in via the BEV_SPAWN branch and takes over the slot.
+        if (e->kind == BEV_SPAWN && (int)e->side == side &&
+            (int)e->slot == slot) return false;
+        if (e->kind == BEV_CLASH || e->kind == BEV_ATTACK) return false;
+        if (e->kind == BEV_ABILITY || e->kind == BEV_DAMAGE ||
+            e->kind == BEV_BUFF) sawIntermediate = true;
+    }
+    return false;
+}
+
+// Forward decl — the debris pool lives further down (with the projectiles),
+// but the ability-KO fly-off below sheds a directional puff on launch.
+static void spawn_debris(int cx, int cy, int dirSign);
 
 // Per-event horizontal offset that battle_draw_unit applies to a sprite
 // (clash lunge, hurt-shake, fly-off in clash window). Extracted so combat-
@@ -991,7 +1050,7 @@ static int event_unit_dx(BattleEvent* e, float t, int side, int slot) {
             float pos = -4.0f + (peak + 4.0f) * local * local;
             return (int)((float)dir * pos);
         }
-        if (clash_kills(game.battlePlayhead, side, slot)) {
+        if (clash_kills_with_flyoff(game.battlePlayhead, side, slot)) {
             // Sprite flies off — popup rides alongside so the number doesn't
             // get left behind at the rest position.
             float flyT = (t - contactT) / (1.0f - contactT);
@@ -1002,10 +1061,11 @@ static int event_unit_dx(BattleEvent* e, float t, int side, int slot) {
         return dir * (int)(peak * (1.0f - r) - 7.0f * sinf(r * PI_F));
     }
     if (e->kind == BEV_DAMAGE && e->side == side && e->slot == slot) {
-        // P2: divide frequency by playback speed so the shake stays
-        // perceptually consistent at all crank speeds (1×..8×).
+        // Subtle flinch — the real "you got hit" feel now comes from the
+        // debris chunks the projectile spits off the victim on impact.
+        // Divide frequency by playback speed so it reads at every crank rate.
         int spd = (int)game.battleSpeed; if (spd < 1) spd = 1;
-        return (int)(sinf(t * 38.0f / (float)spd) * 3.0f);
+        return (int)(sinf(t * 38.0f / (float)spd) * 1.0f);
     }
     return 0;
 }
@@ -1037,7 +1097,15 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
     // Ability KO — a faint not folded into a clash flies off on its own window.
     if (e && e->kind == BEV_FAINT && e->side == side && e->slot == slot) {
         if (p->id == EMPTY_PET) return;
-        battle_burst(restX, BATTLE_FEET - spr / 2, t);
+        // One-time directional debris puff at the launch point, ejecting the
+        // way the unit flies off (replaces the old symmetric spark-star).
+        static int lastFaintBurst = -1;
+        int key = (int)game.battlePlayhead;
+        if (lastFaintBurst != key) {
+            int dir = (side == 0) ? -1 : 1;   // matches draw_unit_flyoff backDir
+            spawn_debris(restX, BATTLE_FEET - spr / 2, dir);
+            lastFaintBurst = key;
+        }
         draw_unit_flyoff(p, side, restX, BATTLE_FEET, spr, t);
         return;
     }
@@ -1053,57 +1121,60 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
         int hover = -(int)(sinf(t * PI_F) * 4.0f);
         render_unit(newPetId, 1, (int16_t)newAtk, (int16_t)newHp, EMPTY_FOOD,
                     restX, BATTLE_FEET + hover, sc, false, false, side == 1);
-        int cy = BATTLE_FEET + hover - (int)(32 * sc) / 2;
-        int r = (int)(8 + t * 14);
-        for (int a = 0; a < 6; a++) {
-            float ang = a * (PI_F / 3.0f) + t * 0.4f;
-            int x1 = restX + (int)(cosf(ang) * r);
-            int y1 = cy    + (int)(sinf(ang) * r);
-            int x2 = restX + (int)(cosf(ang) * (r + 5));
-            int y2 = cy    + (int)(sinf(ang) * (r + 5));
-            GFX_LINE(x1, y1, x2, y2, 2, kColorBlack);
+        // Rising "materialize" wisps instead of an expanding star-ring: short
+        // vertical strokes climbing past the forming unit, staggered so they
+        // ripple upward — reads as 'emerging from the ground', not a burst.
+        for (int a = 0; a < 5; a++) {
+            int wx = restX - 14 + a * 7;
+            float ph = t * 1.25f - (float)a * 0.12f;     // staggered start
+            if (ph <= 0.0f || ph >= 1.0f) continue;
+            int wy = (BATTLE_FEET + hover) - (int)(ph * 40.0f);
+            int len = 3 + (a & 1);
+            GFX_LINE(wx, wy, wx, wy - len, 2, kColorBlack);
         }
         return;
     }
 
-    // Ability emanation — a directional fan of rays sprayed from the source
-    // pet toward the target side, plus a small puff over the head. Reads as
-    // "this pet just fired something across the field" instead of the old
-    // crosshair-on-source (which looked like the pet was being targeted).
-    // Drawn BEFORE the hp gate so faint-triggered abilities (Highland, Goat)
-    // still show their origin after the dying sprite has flown off.
-    bool isMyAbility = e && e->kind == BEV_ABILITY &&
+    // Ghost phase render — slot took lethal damage from a clash but its
+    // parting actions (on-faint ability, AoE damage, Edelweiss hatch, an
+    // Ox friend-faint buff) are still playing out. Keep the dying pet
+    // visible at its rank position with a flickering silhouette and rising
+    // wisps so the rays/projectiles below are clearly anchored to it
+    // instead of looking like they emanate from the survivor behind. The
+    // proper fly-off plays when BEV_FAINT eventually fires.
+    bool selfFaintEv = e && e->kind == BEV_FAINT &&
                        e->side == side && e->slot == slot;
-    if (isMyAbility) {
+    if (!selfFaintEv && slot_in_ghost_phase(side, slot)) {
+        int bob = (int)(sinf((float)game.frameCount * 0.18f) * 2.0f);
         int gx = restX;
-        int gy = BATTLE_FEET - spr / 2;
-        int dir = (side == 0) ? 1 : -1;           // +1 = sprays right, -1 left
-        float k = sinf(t * PI_F);                  // 0 → 1 → 0 over the window
-        // Five rays fanning across a ~90° arc toward the enemy side. Origin
-        // is the pet's leading edge so the rays don't overlap the sprite.
-        int baseX = gx + dir * (spr / 2 - 2);
-        int len = 10 + (int)(k * 18);
-        for (int i = -2; i <= 2; i++) {
-            float ang = (float)i * 0.32f;          // ~18° between rays
-            int dx = (int)(cosf(ang) * (float)dir * (float)len);
-            int dy = (int)(sinf(ang) * (float)len);
-            GFX_LINE(baseX, gy, baseX + dx, gy + dy, 2, kColorBlack);
-        }
-        // Small spark cluster over the firing pet's head — anchors the "this
-        // is the source" reading without re-creating a crosshair on the body.
-        int sx = gx;
-        int sy = gy - spr / 2 - 4;
-        int sr = 3 + (int)(k * 3);
-        for (int a = 0; a < 4; a++) {
-            float ang = (float)a * (PI_F / 2.0f) + 0.4f;
-            GFX_LINE(sx, sy,
-                     sx + (int)(cosf(ang) * sr),
-                     sy + (int)(sinf(ang) * sr), 2, kColorBlack);
+        int gy = BATTLE_FEET + bob;
+        // Frame-driven so the flicker rate stays consistent at every
+        // crank speed (1×..8×). 6 frames normal / 2 frames inverted ≈
+        // 3.75 Hz strobe — readable, not seizure-inducing.
+        bool invert = ((int)game.frameCount & 7) >= 6;
+        if (invert) pd->graphics->setDrawMode(kDrawModeInverted);
+        draw_creature_xform(p->id, gx, gy - spr / 2,
+                            BATTLE_SCALE, 0.0f, side == 1);
+        pd->graphics->setDrawMode(kDrawModeCopy);
+        // Rising wisps above the head, counter-phase to the body flicker
+        // so something is always moving — sells "passing spirit".
+        if (!invert) {
+            int wy = gy - spr - 4;
+            for (int w = -1; w <= 1; w++) {
+                int wx = gx + w * 7;
+                int len = 4 + (w == 0 ? 2 : 0);
+                GFX_LINE(wx, wy, wx, wy - len, 2, kColorBlack);
+            }
         }
     }
 
-    // Don't render the unit sprite for empty or dying slots — the glow above
-    // and the FAINT/SPAWN early-returns handle their respective visuals.
+    // (The ABILITY ray-fan + head sparks used to live here. They've been
+    // replaced by the projectile system — the source pet's wind-up is the
+    // BEV_ABILITY bob (dy below), and the visible attack is the pebble
+    // arcing to each target via projectiles_step_and_draw.)
+
+    // Don't render the unit sprite for empty or dying slots — the ghost
+    // render above and the FAINT/SPAWN early-returns handle those visuals.
     if (p->id == EMPTY_PET || p->hp <= 0) return;
 
     // Lethal clash hit launches the sprite off-screen inside the clash
@@ -1111,7 +1182,7 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
     if (e && e->kind == BEV_CLASH &&
         ((side == 0 && slot == e->slot) || (side == 1 && slot == e->data))) {
         const float contactT = 0.42f;
-        if (t >= contactT && clash_kills(game.battlePlayhead, side, slot)) {
+        if (t >= contactT && clash_kills_with_flyoff(game.battlePlayhead, side, slot)) {
             int dir = (side == 0) ? 1 : -1;
             float flyT = (t - contactT) / (1.0f - contactT);
             draw_unit_flyoff(p, side, restX + dir * 26,
@@ -1151,6 +1222,212 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
     }
 }
 
+// ---------------------------------------------------------------------------
+// Projectile + debris pools. Projectiles arc from the source pet to the
+// target on BEV_ABILITY playback (one per upcoming BEV_DAMAGE in the same
+// barrage), and on landing spawn debris chunks + a rising damage popup.
+// Clash impact also drops chunks off both combatants. The whole pool ages
+// at game.battleSpeed so flight and debris scale with crank fast-forward.
+// ---------------------------------------------------------------------------
+static int g_lastClashImpactPlayhead = -1;
+
+// --- battle screen-shake ---------------------------------------------------
+// A brief positional jitter applied (via setDrawOffset) to the battlefield
+// layer ONLY — bg/topbar/HUD are drawn outside the offset, so there are no
+// edge gaps and the readout stays rock-steady. Armed by weighty hits (lethal
+// clash, ability impacts) and decays over a few frames. Suppressed above 3×
+// crank so fast-forward stays clean instead of seasick.
+static int g_battleShake = 0;
+
+static void battle_shake(int frames) {
+    if (game.battleSpeed > 3) return;
+    if (frames > 6) frames = 6;
+    if (frames > g_battleShake) g_battleShake = frames;
+}
+
+void projectiles_reset(void) {
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        game.projectiles[i].flightLife = 0;
+        game.projectiles[i].popupLife = 0;
+    }
+    for (int i = 0; i < MAX_DEBRIS; i++) {
+        game.debris[i].life = 0;
+    }
+    game.barrageSpawnedAt = 0xFFFF;
+    g_lastClashImpactPlayhead = -1;
+    g_battleShake = 0;
+}
+
+// Visual-only pseudo-random — never touch the simulation RNG from here, or
+// playback would diverge from the simulated log. Frame-derived so the same
+// barrage looks identical on every playthrough of a saved log.
+static uint32_t fx_hash(uint32_t k) {
+    k = (k ^ (k >> 16)) * 0x7feb352du;
+    k = (k ^ (k >> 15)) * 0x846ca68bu;
+    return k ^ (k >> 16);
+}
+
+static void spawn_debris(int cx, int cy, int dirSign) {
+    int n = 4 + (int)(fx_hash((uint32_t)game.frameCount ^ (uint32_t)cx) & 1u);
+    int placed = 0;
+    for (int j = 0; j < MAX_DEBRIS && placed < n; j++) {
+        Debris* d = &game.debris[j];
+        if (d->life != 0) continue;
+        uint32_t h = fx_hash(((uint32_t)game.frameCount << 8) ^
+                             (uint32_t)(j * 31 + placed * 7));
+        float spdFrac = ((float)((h >> 8) & 0xFFu) / 255.0f);
+        float latFrac = ((float)(h & 0xFFu) / 255.0f);
+        float vyMag = 2.0f + spdFrac * 1.6f;            // 2.0..3.6 up
+        float vxMag = 0.6f + latFrac * 1.8f;            // 0.6..2.4 lateral
+        d->x = (float)cx;
+        d->y = (float)cy;
+        d->vx = vxMag * (float)dirSign;
+        d->vy = -vyMag;
+        d->age = 0;
+        d->life = (uint8_t)(14u + ((h >> 16) & 0xFu));  // 14..29
+        d->size = (uint8_t)(2u + ((h >> 20) & 0x1u));   // 2..3
+        d->pad = 0;
+        placed++;
+    }
+}
+
+static void spawn_projectile(int sx, int sy, int ex, int ey,
+                              uint8_t tgtSide, uint8_t tgtSlot, uint8_t dmg) {
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile* p = &game.projectiles[i];
+        if (p->flightLife != 0 || p->popupLife != 0) continue;
+        p->sx = (int16_t)sx; p->sy = (int16_t)sy;
+        p->ex = (int16_t)ex; p->ey = (int16_t)ey;
+        p->age = 0;
+        p->flightLife = 18;
+        p->popupLife = 22;
+        p->side = tgtSide;
+        p->slot = tgtSlot;
+        p->damage = dmg;
+        p->debrisDone = 0;
+        return;
+    }
+}
+
+// Walk forward from the first-in-barrage ABILITY at `abilityIdx`, spawning
+// one projectile per BEV_DAMAGE in the same barrage. All share the same
+// flight life so they land simultaneously regardless of target count.
+static void projectiles_spawn_barrage(int abilityIdx) {
+    if (abilityIdx < 0 || abilityIdx >= game.battleLogLen) return;
+    BattleEvent* a = &game.battleLog[abilityIdx];
+    int srcSide = a->side;
+    int srcSlot = a->slot;
+    int spr = (int)(32 * BATTLE_SCALE);
+    int sx = battle_slot_x(srcSide, srcSlot);
+    int sy = BATTLE_FEET - spr / 2;
+    for (int i = abilityIdx + 1; i < game.battleLogLen; i++) {
+        BattleEvent* e = &game.battleLog[i];
+        if (e->kind == BEV_DAMAGE) {
+            int tgtSide = e->side, tgtSlot = e->slot;
+            if (tgtSlot >= TEAM_SIZE) continue;
+            int ex = battle_slot_x(tgtSide, tgtSlot);
+            int ey = BATTLE_FEET - spr / 2;
+            spawn_projectile(sx, sy, ex, ey,
+                             (uint8_t)tgtSide, (uint8_t)tgtSlot,
+                             (uint8_t)(e->value & 0xFF));
+            continue;
+        }
+        if (e->kind == BEV_ABILITY && e->side == srcSide && e->slot == srcSlot)
+            continue;            // subsequent shot in same barrage
+        break;                   // end of barrage
+    }
+}
+
+static void projectiles_step_and_draw(void) {
+    // Spawn exactly once when the playhead enters a first-in-barrage ABILITY.
+    if (game.battlePlayhead < game.battleLogLen &&
+        game.barrageSpawnedAt != game.battlePlayhead) {
+        BattleEvent* e = &game.battleLog[game.battlePlayhead];
+        if (e->kind == BEV_ABILITY &&
+            ability_first_in_barrage((int)game.battlePlayhead)) {
+            projectiles_spawn_barrage((int)game.battlePlayhead);
+        }
+        game.barrageSpawnedAt = game.battlePlayhead;
+    }
+
+    int speed = (int)game.battleSpeed; if (speed < 1) speed = 1;
+
+    // One impact thud per render frame: a multi-target salvo lands on the
+    // same frame, so latch by frameCount to avoid machine-gunning the SFX.
+    static uint32_t impactSfxFrame = 0xFFFFFFFFu;
+
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile* p = &game.projectiles[i];
+        if (p->flightLife == 0 && p->popupLife == 0) continue;
+        p->age = (int16_t)(p->age + speed);
+
+        if (p->age < p->flightLife) {
+            float tt = (float)p->age / (float)p->flightLife;
+            int dist = p->ex > p->sx ? p->ex - p->sx : p->sx - p->ex;
+            int arcH = clampi(dist / 3, 22, 60);
+            int x = p->sx + (int)((float)(p->ex - p->sx) * tt);
+            int yL = p->sy + (int)((float)(p->ey - p->sy) * tt);
+            int y = yL - (int)(sinf(tt * PI_F) * (float)arcH);
+            GFX_ELLIPSE(x - 2, y - 2, 4, 4, kColorBlack);
+            float tp = tt - 0.12f;
+            if (tp > 0.0f) {
+                int xp = p->sx + (int)((float)(p->ex - p->sx) * tp);
+                int yLp = p->sy + (int)((float)(p->ey - p->sy) * tp);
+                int yp = yLp - (int)(sinf(tp * PI_F) * (float)arcH);
+                GFX_ELLIPSE(xp - 1, yp - 1, 2, 2, kColorBlack);
+            }
+        } else {
+            if (!p->debrisDone) {
+                int dirSign = (p->ex >= p->sx) ? 1 : -1;
+                spawn_debris(p->ex, p->ey, dirSign);
+                p->debrisDone = 1;
+                if (impactSfxFrame != game.frameCount) {
+                    sfx_attack();
+                    impactSfxFrame = game.frameCount;
+                }
+                battle_shake(2 + (int)p->damage / 4);  // weight scales w/ dmg
+            }
+            int landedAge = p->age - p->flightLife;
+            if (landedAge >= p->popupLife) {
+                p->flightLife = 0;
+                p->popupLife = 0;
+                continue;
+            }
+            float tt = (float)landedAge / (float)p->popupLife;
+            char buf[8];
+            snprintf(buf, sizeof(buf), "-%d", (int)p->damage);
+            // Anchor above the target sprite's head so the rising number
+            // doesn't overlap the badges; matches the CLASH-popup height.
+            int popTop = p->ey - (int)(32 * BATTLE_SCALE) / 2 - 8;
+            battle_popup(p->ex, popTop, buf, tt);
+        }
+    }
+}
+
+static void debris_step_and_draw(void) {
+    int speed = (int)game.battleSpeed; if (speed < 1) speed = 1;
+    for (int i = 0; i < MAX_DEBRIS; i++) {
+        Debris* d = &game.debris[i];
+        if (d->life == 0) continue;
+        for (int s = 0; s < speed; s++) {
+            d->x += d->vx;
+            d->y += d->vy;
+            d->vy += 0.35f;                // gravity
+            d->vx *= 0.985f;
+            d->age++;
+            if (d->age >= d->life || d->y > (float)(SCREEN_H + 8)) {
+                d->life = 0;
+                break;
+            }
+        }
+        if (d->life == 0) continue;
+        int sz = d->size;
+        if (d->age * 2 > d->life) sz = sz > 1 ? sz - 1 : 1;  // shrink near end
+        GFX_ELLIPSE((int)d->x - sz / 2, (int)d->y - sz / 2,
+                    sz, sz, kColorBlack);
+    }
+}
+
 void render_battle_screen(void)
 {
     render_alpine_bg(80);
@@ -1177,10 +1454,11 @@ void render_battle_screen(void)
 
     // --- ease unit positions toward their ranked rest spots ---
     // Dying-but-not-yet-fainted slots are excluded so survivors slide
-    // forward immediately. EXCEPT: if the slot has a pending BEV_SPAWN in
-    // the next few events (Hopper → Zombie Hopper, Sheep → Haflingers,
-    // Edelweiss → Bee), keep it in the rank so the neighbour doesn't
-    // shuffle forward and then snap back when the spawn materialises.
+    // forward immediately. EXCEPT: keep the slot in rank when (a) a
+    // BEV_SPAWN will re-occupy it (Hopper → Zombie Hopper, Sheep →
+    // Haflingers, Edelweiss → Bee) or (b) the slot is in ghost phase —
+    // the dying pet is mid-parting-strike and must stay visible so its
+    // on-faint rays/damage anchor to the actual source.
     for (int side = 0; side < 2; side++) {
         int rank = 0;
         for (int i = TEAM_SIZE - 1; i >= 0; i--) {
@@ -1196,7 +1474,7 @@ void render_battle_screen(void)
                         (int)ev->slot == i) { willRespawn = true; break; }
                     if (ev->kind == BEV_CLASH || ev->kind == BEV_ATTACK) break;
                 }
-                if (!willRespawn) continue;
+                if (!willRespawn && !slot_in_ghost_phase(side, i)) continue;
             }
             float tgt = (float)unit_target_x(side, rank);
             float cur = g_unitX[side][i];
@@ -1208,37 +1486,52 @@ void render_battle_screen(void)
         }
     }
 
+    // --- battlefield screen-shake: jitter units + FX only (bg/topbar/HUD
+    //     were drawn above at offset 0, so no edge gaps). Offset is derived
+    //     from the decaying shake timer armed by the weighty hits below; the
+    //     arm takes effect next frame, which reads as instant.
+    int shx = 0, shy = 0;
+    if (g_battleShake > 0) {
+        int mag = g_battleShake; if (mag > 3) mag = 3;
+        shx = (g_battleShake & 1) ? mag : -mag;
+        shy = ((g_battleShake >> 1) & 1) ? (mag - 1) : -(mag - 1);
+        g_battleShake--;
+    }
+    pd->graphics->setDrawOffset(shx, shy);
+
     // --- draw units, back rows first so the frontline overlaps ---
     for (int side = 0; side < 2; side++)
         for (int i = 0; i < TEAM_SIZE; i++)
             if (game.battle.teams[side].slots[i].id != EMPTY_PET)
                 battle_draw_unit(e, t, side, i, g_unitX[side][i]);
 
-    // --- clash impact: spark spokes + an expanding shock-ring at contact ---
-    if (e && e->kind == BEV_CLASH && t > 0.34f && t < 0.66f) {
-        int mx = BATTLE_CX;
+    // --- clash impact: spawn debris off both combatants ONCE at contact ---
+    // The dying pet (if any) flies off via clash_kills_with_flyoff; the
+    // survivor recoils. Either way, on the contact frame each combatant
+    // sheds 4–5 chunks ejecting upward+outward away from the impact line.
+    if (e && e->kind == BEV_CLASH && t >= 0.42f &&
+        g_lastClashImpactPlayhead != (int)game.battlePlayhead) {
         int my = BATTLE_FEET - (int)(32 * BATTLE_SCALE) / 2 - 2;
-        float k = (t - 0.34f) / 0.32f;               // 0..1 across the effect
-        int r  = (int)(7 + k * 24);
-        int lw = (k < 0.45f) ? 3 : 2;
-        for (int a = 0; a < 6; a++) {
-            float ang = a * (PI_F / 3.0f) + 0.30f;
-            GFX_LINE(mx + (int)(cosf(ang) * r * 0.35f),
-                     my + (int)(sinf(ang) * r * 0.35f),
-                     mx + (int)(cosf(ang) * r),
-                     my + (int)(sinf(ang) * r), lw, kColorBlack);
-        }
-        if (k < 0.70f) {                             // expanding shock-ring
-            int rr = (int)(6 + k * 16);
-            pd->graphics->drawEllipse(mx - rr, my - rr, rr * 2, rr * 2,
-                                      2, 0, 360, kColorBlack);
+        int pSlot = (int)e->slot, eSlot = (int)e->data;
+        if (pSlot < TEAM_SIZE && eSlot < TEAM_SIZE) {
+            // Player on left → debris ejects leftward (dirSign = -1).
+            spawn_debris((int)g_unitX[0][pSlot] + 16, my, -1);
+            // Enemy on right → debris ejects rightward (dirSign = +1).
+            spawn_debris((int)g_unitX[1][eSlot] - 16, my, +1);
+            g_lastClashImpactPlayhead = (int)game.battlePlayhead;
+            sfx_attack();                 // melee contact thud
+            // A KO at the front line lands with weight; a survived trade
+            // doesn't shake (the thud + debris already read the contact).
+            if (clash_kills((int)game.battlePlayhead, 0, pSlot) ||
+                clash_kills((int)game.battlePlayhead, 1, eSlot))
+                battle_shake(5);
         }
     }
 
     // --- combat-text popups ---
-    // Anchor each popup at the sprite's CURRENT animated x (rest position
-    // plus the same per-event dx the sprite uses), so the number rises from
-    // above the bouncing/shaking pet rather than its eased rest spot.
+    // CLASH numbers ride the sprite's per-event dx so they don't get left
+    // at the rest position. ABILITY-driven damages are popped by their
+    // projectile (see projectiles_step_and_draw). BUFF popups stay here.
     int popTop = BATTLE_FEET - (int)(32 * BATTLE_SCALE) - 14;
     if (e && t > 0.42f && e->kind == BEV_CLASH) {
         int pDmg = e->value & 0xFF, eDmg = (e->value >> 8) & 0xFF;
@@ -1253,22 +1546,29 @@ void render_battle_screen(void)
             int px = (int)g_unitX[1][e->data] + event_unit_dx(e, t, 1, e->data);
             battle_popup(px, popTop, s, t - 0.42f);
         }
-    } else if (e && (e->kind == BEV_DAMAGE || e->kind == BEV_BUFF) &&
-               e->slot < TEAM_SIZE) {
+    } else if (e && e->kind == BEV_BUFF && e->slot < TEAM_SIZE) {
+        int da = e->value & 0xFF, dh = (e->value >> 8) & 0xFF;
         char s[12]; s[0] = 0;
-        if (e->kind == BEV_DAMAGE) snprintf(s, sizeof(s), "-%d", e->value);
-        else {
-            int da = e->value & 0xFF, dh = (e->value >> 8) & 0xFF;
-            if (da && dh) snprintf(s, sizeof(s), "+%d/%d", da, dh);
-            else if (da) snprintf(s, sizeof(s), "+%d", da);
-            else if (dh) snprintf(s, sizeof(s), "+%d", dh);
-        }
+        if (da && dh) snprintf(s, sizeof(s), "+%d/%d", da, dh);
+        else if (da) snprintf(s, sizeof(s), "+%d", da);
+        else if (dh) snprintf(s, sizeof(s), "+%d", dh);
         if (s[0]) {
             int px = (int)g_unitX[e->side][e->slot]
                    + event_unit_dx(e, t, (int)e->side, (int)e->slot);
             battle_popup(px, popTop, s, t);
         }
     }
+
+    // --- projectile + debris pools ---
+    // Stepped + drawn after units so they read as foreground. Projectiles
+    // also pop their own damage numbers when they land.
+    projectiles_step_and_draw();
+    debris_step_and_draw();
+
+    // Clear the shake offset so the HUD (speed readout, hint) and anything
+    // drawn after render_battle_screen (the pre-battle intro overlay) sit
+    // rock-steady, and battle never leaks an offset into other screens.
+    pd->graphics->setDrawOffset(0, 0);
 
     // --- speed indicator ---
     if (game.battleSpeed > 1) {

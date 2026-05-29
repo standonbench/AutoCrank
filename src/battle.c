@@ -191,6 +191,7 @@ void battle_begin(void) {
     game.battleLogLen = 0;
     trig_reset();
     render_battle_reset_positions();
+    projectiles_reset();
 }
 
 void battle_simulate(void) {
@@ -265,23 +266,59 @@ int battle_event_duration(uint8_t kind) {
         case BEV_FAINT:   return 16;   // quick KO fly-off (ability kills)
         case BEV_BUFF:    return 15;
         case BEV_SPAWN:   return 11;   // shimmer + emerge
-        case BEV_ABILITY: return 14;
+        case BEV_ABILITY: return 22;   // wind-up + projectile flight + impact hold
         case BEV_RESULT:  return 3;
     }
     return 9;
 }
 
+// ---------------------------------------------------------------------------
+// Barrage detection. A "barrage" is a contiguous run of events from the
+// same source pet: one BEV_ABILITY followed by its BEV_DAMAGE events,
+// optionally interleaved with more BEV_ABILITY events from the same source
+// (Mouse L3 fires two separate ABILITY+DAMAGE pairs). The very first
+// ABILITY in the run owns the visual — projectiles are spawned then, all
+// flying simultaneously — and every subsequent ABILITY/DAMAGE collapses to
+// a zero-duration apply so the hp updates land at the same instant the
+// projectiles impact.
+// ---------------------------------------------------------------------------
+bool ability_first_in_barrage(int idx) {
+    if (idx < 0 || idx >= game.battleLogLen) return false;
+    BattleEvent* a = &game.battleLog[idx];
+    if (a->kind != BEV_ABILITY) return false;
+    for (int i = idx - 1; i >= 0; i--) {
+        BattleEvent* e = &game.battleLog[i];
+        if (e->kind == BEV_DAMAGE) continue;
+        if (e->kind == BEV_ABILITY && e->side == a->side && e->slot == a->slot)
+            return false;
+        return true;
+    }
+    return true;
+}
+
+bool damage_in_barrage(int idx) {
+    if (idx < 0 || idx >= game.battleLogLen) return false;
+    BattleEvent* d = &game.battleLog[idx];
+    if (d->kind != BEV_DAMAGE) return false;
+    for (int i = idx - 1; i >= 0; i--) {
+        BattleEvent* e = &game.battleLog[i];
+        if (e->kind == BEV_DAMAGE) continue;
+        if (e->kind == BEV_ABILITY) return true;
+        return false;
+    }
+    return false;
+}
+
 // Did the faint at `faintIdx` happen as the direct result of a front-line
-// clash? If so its fly-off plays during the clash window — the FAINT event
-// itself needs no window of its own.
+// clash, with NOTHING animatable between them? Only then can the FAINT
+// event collapse to zero duration — the dying pet already flew off inside
+// the clash window itself.
 //
-// We scan back to the most recent CLASH the slot participated in. If between
-// that clash and this FAINT there's been NO further BEV_DAMAGE or BEV_SPAWN
-// for this slot, the unit is the same one that already flew off in the clash
-// window and a second flyoff would look like it "respawned and died again."
-// If there WAS damage/spawn for this slot in between, the killing blow was
-// not the clash (it was an AoE, a faint-counter, etc.) — keep the FAINT
-// animation so the death reads clearly.
+// If anything visual happened in between — the dying pet's own parting
+// ABILITY/DAMAGE (Goat AoE, Mouse death-shot), an Ox friend-faint BUFF, an
+// Edelweiss SPAWN — the render path keeps the unit on-screen as a ghost
+// during those events and defers the fly-off until BEV_FAINT plays. In
+// that case the FAINT needs its full window for the proper send-off.
 static bool faint_from_clash(int faintIdx) {
     if (faintIdx < 0 || faintIdx >= game.battleLogLen) return false;
     BattleEvent* f = &game.battleLog[faintIdx];
@@ -297,20 +334,33 @@ static bool faint_from_clash(int faintIdx) {
     if (clashIdx < 0) return false;
     for (int i = clashIdx + 1; i < faintIdx; i++) {
         BattleEvent* e = &game.battleLog[i];
-        if ((e->kind == BEV_DAMAGE || e->kind == BEV_SPAWN) &&
-            e->side == f->side && e->slot == f->slot) {
+        // Any animatable event between the clash and the faint means the
+        // ghost-render path is keeping the dying pet visible; the FAINT
+        // itself must play so the ghost has a fly-off send-off.
+        if (e->kind == BEV_ABILITY || e->kind == BEV_DAMAGE ||
+            e->kind == BEV_BUFF    || e->kind == BEV_SPAWN) {
             return false;
         }
     }
     return true;
 }
 
-// Animation window for the event at `playhead`. Clash-driven faints collapse
-// to zero — the dying unit already flew off during the clash window itself.
+// Animation window for the event at `playhead`. Several events collapse
+// to zero so the playback flows correctly around the projectile system
+// and the clash flyoff:
+//   • FAINT folded into a preceding clash (the unit already flew off in
+//     the clash window itself).
+//   • Subsequent same-source ABILITY in a multi-shot barrage (the first
+//     ABILITY's window covers the whole projectile salvo).
+//   • DAMAGE belonging to an ability barrage (its hp delta applies the
+//     instant the projectile impacts; the visual is the projectile and
+//     debris, not an event-window beat).
 int battle_event_window(int playhead) {
     if (playhead < 0 || playhead >= game.battleLogLen) return 0;
     BattleEvent* e = &game.battleLog[playhead];
     if (e->kind == BEV_FAINT && faint_from_clash(playhead)) return 0;
+    if (e->kind == BEV_ABILITY && !ability_first_in_barrage(playhead)) return 0;
+    if (e->kind == BEV_DAMAGE && damage_in_barrage(playhead)) return 0;
     return battle_event_duration(e->kind);
 }
 

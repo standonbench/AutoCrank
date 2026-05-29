@@ -49,7 +49,17 @@ static void play(PDSynth* s, float hz, float vol, float len) {
 void sfx_buy(void)    { play(sBuy,   880.0f, 0.45f, 0.08f); }
 void sfx_sell(void)   { play(sSell,  330.0f, 0.40f, 0.10f); }
 void sfx_roll(void)   { play(sRoll,  220.0f, 0.35f, 0.10f); }
-void sfx_attack(void) { play(sAttack, 140.0f + rng_float() * 60.0f, 0.35f, 0.06f); }
+// Impact "thud" for clash contact and projectile landings. Deterministic
+// pitch wobble (a cycling table, NOT rng_float) so repeated hits don't sound
+// mechanical — and so audio can never perturb the battle's simulation RNG
+// (_rng_state). Playback must stay reproducible; see battle.c determinism note.
+void sfx_attack(void) {
+    static uint8_t n = 0;
+    static const float jitter[4] = { 0.0f, 22.0f, -14.0f, 36.0f };
+    float hz = 150.0f + jitter[n & 3];
+    n++;
+    play(sAttack, hz, 0.35f, 0.06f);
+}
 void sfx_faint(void)  { play(sFaint, 200.0f, 0.40f, 0.20f); }
 void sfx_win(void)    { play(sWin,   660.0f, 0.50f, 0.35f); }
 void sfx_lose(void)   { play(sLose,  120.0f, 0.45f, 0.40f); }
