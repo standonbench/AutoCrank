@@ -186,17 +186,28 @@ void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed) {
         ai_simulate_turn(&s, tier);
     }
 
-    // Win-streak ghost-team scaling — the only post-sim tilt. Streakers face
-    // a slightly tougher version of the simulated team; struggling players
-    // get the baseline.
-    int streakBump = (int)game.wins / 2;
-    if (streakBump > 3) streakBump = 3;
-    if (streakBump > 0) {
+    // Win-streak ghost-team scaling — the only post-sim tilt. Two goals:
+    // streakers face progressively sturdier ghosts so reaching 10 wins feels
+    // earned, but the tilt stays gentle and HP-biased. Front-line combat is
+    // extremely swingy (the balance harness shows a flat +1/+1 to every enemy
+    // pet flips an even matchup into a ~70% loss), so a heavy symmetric bump
+    // turns the back half into an unwinnable spiral. Extra HP adds durability
+    // without speeding up kills (less snowball) while a smaller, slower atk
+    // bump keeps some teeth. A player on the ropes (<=2 lives) gets a one-step
+    // mercy so a rough patch can still be clawed back.
+    int hpBump  = (int)game.wins / 4;          // +1 hp per 4 wins
+    int atkBump = (int)game.wins / 6;          // +1 atk per 6 wins (slower)
+    if (game.lives > 0 && game.lives <= 2) { hpBump--; atkBump--; }
+    if (hpBump  > 2) hpBump  = 2;              // caps: at most +1/+2 late game
+    if (atkBump > 1) atkBump = 1;
+    if (hpBump  < 0) hpBump  = 0;
+    if (atkBump < 0) atkBump = 0;
+    if (hpBump || atkBump) {
         for (int i = 0; i < TEAM_SIZE; i++) {
             PetSlot* p = &s.team.slots[i];
             if (p->id == EMPTY_PET) continue;
-            p->atk = (int16_t)mini(p->atk + streakBump, STAT_CAP);
-            p->hp  = (int16_t)mini(p->hp + streakBump, STAT_CAP);
+            p->atk = (int16_t)mini(p->atk + atkBump, STAT_CAP);
+            p->hp  = (int16_t)mini(p->hp + hpBump,  STAT_CAP);
         }
     }
 

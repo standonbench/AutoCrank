@@ -76,14 +76,12 @@ static int sim_match(const Team* a, const Team* b) {
 // ---------------------------------------------------------------------------
 // Report 1: difficulty curve
 // ---------------------------------------------------------------------------
-static void balance_curve(void) {
+static void curve_pass(const char* label, int lives) {
     const int SEEDS = 500;
-    printf("\n== DIFFICULTY CURVE ==\n");
-    printf("Competent player (unbumped) vs the turn-matched, streak-bumped enemy.\n");
-    printf("Each row = %d seeds x2 orderings. Player win%% well under 50%% => climb escalates.\n\n",
-           SEEDS);
-    printf("turn  enemyBump   playerWin%%   draw%%   loss%%    avgPlayerStat  avgEnemyStat\n");
-    printf("----  ---------   ----------   -----   -----    -------------  ------------\n");
+    game.lives = (uint8_t)lives;   // enemy bump reads this (comeback at <=2)
+    printf("\n-- %s --\n", label);
+    printf("turn  playerWin%%   draw%%   loss%%    avgPlayerStat  avgEnemyStat\n");
+    printf("----  ----------   -----   -----    -------------  ------------\n");
     for (int turn = 1; turn <= 10; turn++) {
         int W = turn - 1;                  // wins roughly track turns survived
         int win = 0, loss = 0, draw = 0;
@@ -91,6 +89,7 @@ static void balance_curve(void) {
         for (int s = 0; s < SEEDS; s++) {
             uint32_t seedP = rng_next(), seedE = rng_next();
             Team P, E;
+            game.lives = (uint8_t)lives;
             game.wins = 0;            ai_generate_opponent(&P, (uint8_t)turn, seedP);
             game.wins = (uint8_t)W;   ai_generate_opponent(&E, (uint8_t)turn, seedE);
             pstat += team_stat(&P); estat += team_stat(&E);
@@ -101,13 +100,21 @@ static void balance_curve(void) {
             if (r2 == 1) win++; else if (r2 == 0) loss++; else draw++;
         }
         int games = SEEDS * 2;
-        printf("%4d  %9d   %9.1f%%   %5.1f   %5.1f    %13.1f  %12.1f\n",
-               turn, W,
+        printf("%4d   %9.1f%%   %5.1f   %5.1f    %13.1f  %12.1f\n",
+               turn,
                100.0 * win / games, 100.0 * draw / games, 100.0 * loss / games,
                (double)pstat / SEEDS, (double)estat / SEEDS);
     }
-    // Streak bump caps at +3 (ai.c: streakBump = wins/2, clamped 3) — turns
-    // 7..10 share the same bump, so watch whether win% flattens there.
+}
+
+static void balance_curve(void) {
+    printf("\n== DIFFICULTY CURVE ==\n");
+    printf("Competent player (unbumped) vs the turn-matched, win-streak-bumped enemy.\n");
+    printf("Each row = 500 seeds x2 orderings. Baseline-skill player; a real (better)\n");
+    printf("player wins more. Lower player-win%% = harder climb; compare the two passes\n");
+    printf("to see the <=2-lives comeback mercy ease the enemy.\n");
+    curve_pass("HEALTHY (5 lives) — streaker challenge", 5);
+    curve_pass("ON THE ROPES (2 lives) — comeback mercy active", 2);
 }
 
 // ---------------------------------------------------------------------------

@@ -102,7 +102,7 @@ const PetDef PETS[PET_COUNT] = {
           "Faint: 3 dmg to all enemies.",
           "Faint: 4 dmg enemies, 2 dmg friends." },
         { H_FAINT  pet_hedgehog_faint } },
-    [8]  = { "Haflinger", 2, 2, 2,  8,
+    [8]  = { "Haflinger", 3, 3, 2,  8,
         { "Ally summoned: give it +2 atk.",
           "Ally summoned: give it +3 atk.",
           "Ally summoned: give it +3/+2." },
