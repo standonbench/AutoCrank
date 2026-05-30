@@ -690,6 +690,10 @@ int update(void* userdata)
         ui_hof_update();
         ui_hof_render();
         break;
+    case STATE_HELP:
+        ui_help_update();
+        ui_help_render();
+        break;
     }
 
     if (g_debugOverlay) pd->system->drawFPS(SCREEN_W - 22, 2);

@@ -11,25 +11,42 @@ static void  draw_scaled_text(const char* s, LCDFont* font, int cx, int cy,
                               float scale, bool invertColor);
 static void  draw_flash_overlay(bool on);
 
+// Onboarding flow: true when how-to-play was opened from PLAY on a first run,
+// so dismissing it continues into the team-name picker rather than the title.
+static bool g_helpThenPlay = false;
+
 // ---------------------------------------------------------------------------
-// Title screen
+// Title screen — menu: PLAY / HALL / ROSTER / TEST / HELP (titleCursor 0..4).
 // ---------------------------------------------------------------------------
 void ui_title_update(void) {
     PDButtons cur, prs, rel;
     pd->system->getButtonState(&cur, &prs, &rel);
     game.titleBlinkTimer++;
     if (prs & kButtonUp)
-        game.titleCursor = (uint8_t)((game.titleCursor + 3) % 4);
+        game.titleCursor = (uint8_t)((game.titleCursor + 4) % 5);
     if (prs & kButtonDown)
-        game.titleCursor = (uint8_t)((game.titleCursor + 1) % 4);
+        game.titleCursor = (uint8_t)((game.titleCursor + 1) % 5);
     if (prs & kButtonA) {
         switch (game.titleCursor) {
-        case 0: ui_team_name_enter(); break;     // PLAY -> name picker -> run
+        case 0:                                   // PLAY
+            // First-ever PLAY shows the how-to-play once, then continues into
+            // the run; afterwards it goes straight to the team-name picker.
+            if (!(game.settings & SETTING_HELP_SEEN)) {
+                g_helpThenPlay = true;
+                game.state = STATE_HELP;
+            } else {
+                ui_team_name_enter();
+            }
+            break;
         case 1: ui_hof_enter();        break;     // HALL OF FAME
         case 2: game.state = STATE_GALLERY; break;
         case 3:
             selftest_run();
             game.state = STATE_SELFTEST;
+            break;
+        case 4:                                   // HELP (re-readable any time)
+            g_helpThenPlay = false;
+            game.state = STATE_HELP;
             break;
         }
     }
@@ -316,10 +333,11 @@ void ui_title_render(void) {
     draw_creature_haloed(13, 250, 170, S, false);   // Highland, right
 
     // --- floating menu cards (right-side stack) ---
-    draw_menu_card(332,  92, "PLAY",   game.titleCursor == 0);
-    draw_menu_card(332, 118, "HALL",   game.titleCursor == 1);
-    draw_menu_card(332, 144, "ROSTER", game.titleCursor == 2);
-    draw_menu_card(332, 170, "TEST",   game.titleCursor == 3);
+    draw_menu_card(332,  86, "PLAY",   game.titleCursor == 0);
+    draw_menu_card(332, 110, "HALL",   game.titleCursor == 1);
+    draw_menu_card(332, 134, "ROSTER", game.titleCursor == 2);
+    draw_menu_card(332, 158, "TEST",   game.titleCursor == 3);
+    draw_menu_card(332, 182, "HELP",   game.titleCursor == 4);
 
     // --- title banner with pennants ---
     if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
@@ -1260,4 +1278,71 @@ void ui_hof_render(void) {
     snprintf(nav, sizeof(nav), "%u / %u   B back",
              (unsigned)(game.hofCursor + 1), (unsigned)game.hofCount);
     draw_text_halo(nav, game.fontSmall, 8, 222);
+}
+
+// ---------------------------------------------------------------------------
+// How-to-play — shown once on the first PLAY (then continues into the run),
+// and re-readable any time from the title HELP entry.
+// ---------------------------------------------------------------------------
+static const char* HELP_LINES[] = {
+    "A: buy a pet (3 gold) - fill your 5 slots.",
+    "Buy a 2nd of the same pet to merge + level up.",
+    "Hold a team pet with A, then crank to reorder.",
+    "B: freeze a shop slot, or sell a team pet.",
+    "Roll (1 gold) to refresh the shop.",
+    "Battles auto-play - your RIGHT-most pet leads.",
+    "Win 10 battles to take the run. You get 5 lives.",
+    "In battle: crank or hold A to fast-forward.",
+};
+#define HELP_LINE_COUNT ((int)(sizeof(HELP_LINES) / sizeof(HELP_LINES[0])))
+
+void ui_help_update(void) {
+    PDButtons cur, prs, rel;
+    pd->system->getButtonState(&cur, &prs, &rel);
+    if (prs & kButtonA) {
+        game.settings |= SETTING_HELP_SEEN;
+        save_write();
+        if (g_helpThenPlay) { g_helpThenPlay = false; ui_team_name_enter(); }
+        else                  game.state = STATE_TITLE;
+    } else if (prs & kButtonB) {
+        game.settings |= SETTING_HELP_SEEN;
+        save_write();
+        g_helpThenPlay = false;
+        game.state = STATE_TITLE;
+    }
+}
+
+void ui_help_render(void) {
+    LCDBitmap* bg = image_title_bg();
+    if (bg) pd->graphics->drawBitmap(bg, 0, 0, kBitmapUnflipped);
+    else    render_alpine_bg(150);
+
+    int px = 18, py = 16, pw = SCREEN_W - 36, ph = SCREEN_H - 32;
+    draw_banner_card(px, py, pw, ph);            // white card, shadow + border
+
+    // Title strip
+    GFX_FILL(px, py, pw, 24, kColorBlack);
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    pd->graphics->setDrawMode(kDrawModeFillWhite);
+    const char* T = "HOW TO PLAY";
+    int tw = pd->graphics->getTextWidth(game.fontBold, T, strlen(T), kASCIIEncoding, 0);
+    pd->graphics->drawText(T, strlen(T), kASCIIEncoding, px + (pw - tw) / 2, py + 4);
+
+    // Lines
+    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
+    pd->graphics->setDrawMode(kDrawModeFillBlack);
+    int ly = py + 34;
+    for (int i = 0; i < HELP_LINE_COUNT; i++) {
+        pd->graphics->drawText(HELP_LINES[i], strlen(HELP_LINES[i]),
+                               kASCIIEncoding, px + 12, ly);
+        ly += 17;
+    }
+
+    // Footer prompt
+    const char* f = g_helpThenPlay ? "A  let's go!" : "A / B  back";
+    if (game.fontBold) pd->graphics->setFont(game.fontBold);
+    int fw = pd->graphics->getTextWidth(game.fontBold, f, strlen(f), kASCIIEncoding, 0);
+    pd->graphics->drawText(f, strlen(f), kASCIIEncoding,
+                           px + (pw - fw) / 2, py + ph - 24);
+    pd->graphics->setDrawMode(kDrawModeCopy);
 }

@@ -87,6 +87,7 @@ typedef enum {
     STATE_GALLERY,
     STATE_TEAM_NAME,
     STATE_HALL_OF_FAME,
+    STATE_HELP,
 } GameState;
 
 // ---------------------------------------------------------------------------
@@ -459,6 +460,10 @@ void ui_team_name_render(void);
 void ui_hof_enter(void);
 void ui_hof_update(void);
 void ui_hof_render(void);
+
+// ui.c how-to-play
+void ui_help_update(void);
+void ui_help_render(void);
 
 // game.c — record a 10-win run into the Hall of Fame ring buffer.
 void hof_record_win(void);
