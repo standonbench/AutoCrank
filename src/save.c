@@ -85,7 +85,13 @@ static void save_set_defaults(void) {
 }
 
 void save_load(void) {
-    SDFile* f = pd->file->open("save.bin", kFileRead);
+    // save.bin lives in the game's Data folder (save_write uses kFileWrite).
+    // kFileRead alone only searches the pdx bundle, so it never found the save
+    // and every launch silently fell back to defaults (lifetime stats, run
+    // resume, hall of fame and settings all failed to persist). kFileReadData
+    // reads the Data folder; OR'd with kFileRead it also tolerates a bundled
+    // default save if one is ever shipped.
+    SDFile* f = pd->file->open("save.bin", kFileReadData | kFileRead);
     if (!f) {
         save_set_defaults();
         DLOG("No save file, using defaults.");
