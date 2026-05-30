@@ -12,7 +12,9 @@ bool g_debugOverlay = false;
 // Forward decls (debug harness lives below init)
 // ---------------------------------------------------------------------------
 static void register_debug_menu(void);
+#if DEBUG_BUILD
 static void debug_force_team(int presetIdx);
+#endif
 
 // ---------------------------------------------------------------------------
 // Init
@@ -44,21 +46,15 @@ void game_init(void)
 }
 
 // ---------------------------------------------------------------------------
-// Debug harness — accessible via Playdate system menu (hold MENU)
+// System-menu items (hold MENU).
+//
+// The Playdate OS shows at most THREE game menu items, so we surface the
+// player-facing "Sound" toggle (every build) plus — in dev builds only — a
+// "Cheat" picker and a consolidated "Scene" picker (preview jumps + forced
+// synergy teams + FPS overlay). Everything under Sound is compiled out of
+// release builds (DEBUG_BUILD=0), so players never see debug controls.
 // ---------------------------------------------------------------------------
-static const char* DBG_PRESETS[] = { "none", "Death", "Summon", "Buff", "Damage", "Copy" };
-#define DBG_PRESET_COUNT 6
-
-static void menu_toggle_debug(void* userdata) {
-    (void)userdata;
-    g_debugOverlay = !g_debugOverlay;
-    DLOG("debug overlay = %d", (int)g_debugOverlay);
-}
-
-static PDMenuItem* g_mPreset = NULL;
-static PDMenuItem* g_mCheat  = NULL;
-static PDMenuItem* g_mPreview = NULL;
-static PDMenuItem* g_mSound  = NULL;
+static PDMenuItem* g_mSound = NULL;
 
 // Player-facing setting: toggle SFX. Checked = sound on. Persists to save.
 static void menu_sound_toggle(void* userdata) {
@@ -71,12 +67,9 @@ static void menu_sound_toggle(void* userdata) {
     save_write();
 }
 
-static void menu_team_preset(void* userdata) {
-    (void)userdata;
-    if (!g_mPreset) return;
-    int idx = pd->system->getMenuItemValue(g_mPreset);
-    debug_force_team(idx);
-}
+#if DEBUG_BUILD
+static PDMenuItem* g_mCheat = NULL;
+static PDMenuItem* g_mScene = NULL;
 
 static void menu_cheat_battle(void* userdata) {
     (void)userdata;
@@ -96,7 +89,16 @@ static void menu_cheat_battle(void* userdata) {
             shop_refill();
             DLOG("cheat: jumped to turn 5");
             break;
-        case 3: // instant win current battle (if in battle/result state)
+        case 3: // jump to the late game: hardest AI + biggest FX (turn 9 / 8 wins)
+            game.turn = 9;
+            game.wins = 8;
+            game.shop.gold = STARTING_GOLD;
+            game.shop.frozenPets = 0;
+            game.shop.frozenFoods = 0;
+            shop_refill();
+            DLOG("cheat: jumped to turn 9 / 8 wins");
+            break;
+        case 4: // instant win current battle (if in battle/result state)
             if (game.state == STATE_BATTLE || game.state == STATE_PRE_BATTLE ||
                 game.state == STATE_RESULT) {
                 game.battleResult = 0;
@@ -105,7 +107,7 @@ static void menu_cheat_battle(void* userdata) {
             }
             DLOG("cheat: win battle");
             break;
-        case 4: // reset run
+        case 5: // reset run
             game.inRun = false;
             game.state = STATE_TITLE;
             save_write();
@@ -116,10 +118,8 @@ static void menu_cheat_battle(void* userdata) {
 }
 
 // Jump straight to an animated screen — saves 5+ minutes per polish iteration.
-static void menu_preview_jump(void* userdata) {
-    (void)userdata;
-    if (!g_mPreview) return;
-    int idx = pd->system->getMenuItemValue(g_mPreview);
+// idx: 1=PreBattle 2=Win 3=Loss 4=Draw 5=GameOver 6=Victory
+static void preview_jump(int idx) {
     if (idx == 0) return;
 
     // Common: ensure a plausible run/team is set up so the animations have
@@ -180,32 +180,48 @@ static void menu_preview_jump(void* userdata) {
         game.resultTimer = 0;
         break;
     }
-    pd->system->setMenuItemValue(g_mPreview, 0);
 }
 
+// Consolidated dev picker: preview jumps (1-6), forced synergy teams (7-9),
+// and the FPS/debug overlay (10). Resets to rest after acting.
+static void menu_scene(void* userdata) {
+    (void)userdata;
+    if (!g_mScene) return;
+    int idx = pd->system->getMenuItemValue(g_mScene);
+    if (idx >= 1 && idx <= 6) {
+        preview_jump(idx);
+    } else if (idx >= 7 && idx <= 9) {
+        static const int preset[] = { 4, 5, 1 };  // F:Dmg, F:Copy, F:Death
+        debug_force_team(preset[idx - 7]);
+    } else if (idx == 10) {
+        g_debugOverlay = !g_debugOverlay;
+        DLOG("debug overlay = %d", (int)g_debugOverlay);
+    }
+    pd->system->setMenuItemValue(g_mScene, 0);
+}
+#endif // DEBUG_BUILD
+
 static void register_debug_menu(void) {
-    // Player-facing first: Sound on/off (checked = on), reflecting saved state.
+    // Player-facing, every build: Sound on/off (checked = on), from saved state.
     g_mSound = pd->system->addCheckmarkMenuItem(
         "Sound", (game.settings & SETTING_SFX_MUTE) ? 0 : 1, menu_sound_toggle, NULL);
 
-    pd->system->addCheckmarkMenuItem("Debug Overlay", 0, menu_toggle_debug, NULL);
-
-    static const char* presetTitles[DBG_PRESET_COUNT];
-    for (int i = 0; i < DBG_PRESET_COUNT; i++) presetTitles[i] = DBG_PRESETS[i];
-    g_mPreset = pd->system->addOptionsMenuItem(
-        "Force Team", presetTitles, DBG_PRESET_COUNT, menu_team_preset, NULL);
-
-    static const char* cheatTitles[] = { "-", "+5g", "Turn 5", "Win", "Reset" };
+#if DEBUG_BUILD
+    // Two dev tools fill the remaining slots (Playdate caps menu items at 3).
+    static const char* cheatTitles[] = { "-", "+5g", "Turn 5", "Turn 9", "Win", "Reset" };
     g_mCheat = pd->system->addOptionsMenuItem(
-        "Cheat", cheatTitles, 5, menu_cheat_battle, NULL);
+        "Cheat", cheatTitles, 6, menu_cheat_battle, NULL);
 
-    static const char* previewTitles[] = {
-        "-", "PreBattle", "Win", "Loss", "Draw", "GameOver", "Victory"
+    static const char* sceneTitles[] = {
+        "-", "PreBattle", "Win", "Loss", "Draw", "GameOver", "Victory",
+        "F:Dmg", "F:Copy", "F:Death", "FPS"
     };
-    g_mPreview = pd->system->addOptionsMenuItem(
-        "Preview", previewTitles, 7, menu_preview_jump, NULL);
+    g_mScene = pd->system->addOptionsMenuItem(
+        "Scene", sceneTitles, 11, menu_scene, NULL);
+#endif
 }
 
+#if DEBUG_BUILD
 // Pre-baked test teams for fast synergy iteration.
 // Each preset is up to 5 pet IDs (EMPTY_PET = empty slot).
 static const uint8_t DBG_TEAM_DEATH[5]  = {  4,  6,  9, 11,  7 }; // Cricket Sheep Ox Spider Hedgehog
@@ -250,6 +266,7 @@ static void debug_force_team(int presetIdx) {
     }
     DLOG("forced team preset %d", presetIdx);
 }
+#endif // DEBUG_BUILD
 
 // ---------------------------------------------------------------------------
 // Run lifecycle

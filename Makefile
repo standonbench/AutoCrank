@@ -28,5 +28,12 @@ include $(SDK)/C_API/buildsupport/common.mk
 SRCHDR = $(wildcard src/*.h)
 build/pdex.dylib: $(SRCHDR)
 
+# common.mk's simulator (dylib) rule omits $(UDEFS), so project defines like
+# DEBUG_BUILD never reach simulator builds — only the device build. Mirror
+# UDEFS into the sim compiler flags so both builds agree (e.g. the DEBUG_BUILD
+# gating of the dev system-menu tools). A release build flips UDEFS and both follow.
+CLANGFLAGS += $(UDEFS)
+GCCFLAGS   += $(UDEFS)
+
 run: all
 	open -a "$(SDK)/bin/Playdate Simulator.app" $(PRODUCT)
