@@ -77,14 +77,14 @@ const PetDef PETS[PET_COUNT] = {
           "End of turn: +2/+1 to both neighbors." },
         { H_EOT    pet_frog_eot } },
     [3]  = { "Hedgehog",  2, 1, 1,  3,
-        { "Battle start: +1 atk to all friends.",
-          "Battle start: +2 atk to all friends.",
-          "Battle start: +2/+1 to all friends." },
+        { "Battle start: +1/+1 to all friends.",
+          "Battle start: +2/+1 to all friends.",
+          "Battle start: +2/+2 to all friends." },
         { H_SOB    pet_bee_sob } },
     [4]  = { "Rabbit",    2, 2, 1,  4,
-        { "Faint: spawn a 1/1 Rabbit here.",
-          "Faint: spawn a 2/2 Rabbit here.",
-          "Faint: spawn a 3/3 Rabbit w/ Edelweiss." },
+        { "Faint: spawn a 2/2 Rabbit here.",
+          "Faint: spawn a 3/3 Rabbit here.",
+          "Faint: spawn a 4/4 Rabbit w/ Edelweiss." },
         { H_FAINT  pet_cricket_faint } },
     [5]  = { "Calf",      3, 3, 1,  5,   // cow-0 (brown)
         { "On own buy: add Milk to the shop.",
@@ -103,9 +103,9 @@ const PetDef PETS[PET_COUNT] = {
           "Faint: 4 dmg enemies, 2 dmg friends." },
         { H_FAINT  pet_hedgehog_faint } },
     [8]  = { "Haflinger", 3, 3, 2,  8,
-        { "Ally summoned: give it +2 atk.",
-          "Ally summoned: give it +3 atk.",
-          "Ally summoned: give it +3/+2." },
+        { "Ally summoned: give it +2/+1.",
+          "Ally summoned: give it +3/+2.",
+          "Ally summoned: give it +3/+3." },
         { H_SUMMON pet_horse_summon } },
     [9]  = { "Donkey",    2, 4, 2,  9,
         { "Ally faints: gain +2 atk.",
@@ -126,7 +126,7 @@ const PetDef PETS[PET_COUNT] = {
     [12] = { "Alpaca",    5, 4, 3, 12,
         { "Battle start: 8 dmg to last enemy.",
           "Battle start: 12 dmg to last enemy.",
-          "Battle start: 12 dmg to last two enemies." },
+          "Battle start: 15 dmg to the last enemy." },
         { H_SOB    pet_croc_sob } },
     [13] = { "Highland",  4, 8, 3, 13,   // alpaca (shaggy alpine)
         { "Faint: 5 dmg to a random enemy.",
@@ -146,7 +146,7 @@ const PetDef PETS[PET_COUNT] = {
     [16] = { "Fox",       4, 5, 3, 16,
         { "Battle start: re-fire right ally.",
           "Battle start: re-fire right ally twice.",
-          "Battle start: re-fire right ally x3." },
+          "Battle start: re-fire right ally twice." },
         { H_SOB    pet_tiger_sob } },
     [17] = { "Bear",      6, 8, 3, 17,
         { "Buy a T1: +1/+1 to all friends.",
@@ -332,14 +332,15 @@ static void pet_frog_eot(BattleState* bs, uint8_t side, uint8_t slot, TriggerEve
 }
 
 static void pet_bee_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // L1: +1 atk all friends. L2: +2 atk all. L3: +2/+1 all (gains hp at L3).
+    // L1: +1/+1 all friends. L2: +2/+1 all. L3: +2/+2 all. The hp on the team
+    // anthem lets a wide board shrug off the pre-combat snipe meta.
     (void)ev;
     int lvl = (int)bs->teams[side].slots[slot].level;
     int a, h;
     switch (lvl) {
-        case 1:  a = 1; h = 0; break;
-        case 2:  a = 2; h = 0; break;
-        default: a = 2; h = 1; break;
+        case 1:  a = 1; h = 1; break;
+        case 2:  a = 2; h = 1; break;
+        default: a = 2; h = 2; break;
     }
     for (int i = 0; i < TEAM_SIZE; i++) {
         if (bs->teams[side].slots[i].id == EMPTY_PET) continue;
@@ -348,7 +349,9 @@ static void pet_bee_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEven
 }
 
 static void pet_cricket_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // L1: spawn 1/1 Hopper. L2: 2/2. L3: 3/3 holding Edelweiss (Bee on faint).
+    // L1: spawn 2/2 Hopper. L2: 3/3. L3: 4/4 holding Edelweiss (Bee on faint).
+    // A real body (not 1/1 chaff) so the respawn matters on its own and feeds
+    // summon/death payoffs (Pup, Haflinger, Donkey, Alligator).
     if (ev->side != side || ev->srcSlot != slot) return;
     // Spawned Zombie Hoppers carry the same faint handler; bail if this is
     // already a spawn so the cascade stops at one zombie per original.
@@ -357,9 +360,9 @@ static void pet_cricket_faint(BattleState* bs, uint8_t side, uint8_t slot, Trigg
     int atk, hp;
     bool withEdelweiss;
     switch (lvl) {
-        case 1:  atk = 1; hp = 1; withEdelweiss = false; break;
-        case 2:  atk = 2; hp = 2; withEdelweiss = false; break;
-        default: atk = 3; hp = 3; withEdelweiss = true;  break;
+        case 1:  atk = 2; hp = 2; withEdelweiss = false; break;
+        case 2:  atk = 3; hp = 3; withEdelweiss = false; break;
+        default: atk = 4; hp = 4; withEdelweiss = true;  break;
     }
     summon_pet_in_slot(bs, side, slot, 4 /*Hopper*/, (int16_t)atk, (int16_t)hp);
     if (withEdelweiss) {
@@ -462,7 +465,8 @@ static void pet_hedgehog_faint(BattleState* bs, uint8_t side, uint8_t slot, Trig
 
 static void pet_horse_summon(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
     // Haflinger buff to the just-summoned friend (ev->dataSlot), unless it's us.
-    // L1: +2 atk. L2: +3 atk. L3: +3/+2 (gains hp at L3).
+    // L1: +2/+1. L2: +3/+2. L3: +3/+3. Summons now gain hp as well as atk so a
+    // buffed swarm actually survives a clash instead of being glass cannons.
     if (ev->side != side) return;
     if (ev->srcSlot == slot) return;
     if (ev->dataSlot >= TEAM_SIZE) return;
@@ -470,9 +474,9 @@ static void pet_horse_summon(BattleState* bs, uint8_t side, uint8_t slot, Trigge
     int lvl = (int)bs->teams[side].slots[slot].level;
     int a, h;
     switch (lvl) {
-        case 1:  a = 2; h = 0; break;
-        case 2:  a = 3; h = 0; break;
-        default: a = 3; h = 2; break;
+        case 1:  a = 2; h = 1; break;
+        case 2:  a = 3; h = 2; break;
+        default: a = 3; h = 3; break;
     }
     battle_emit(bs, BEV_BUFF, side, ev->dataSlot, encode_pair(a, h), 0);
 }
@@ -539,15 +543,18 @@ static void pet_spider_faint(BattleState* bs, uint8_t side, uint8_t slot, Trigge
 // Tier 3 pet abilities (simplified for v0)
 // ---------------------------------------------------------------------------
 static void pet_croc_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Bernard snipes the enemy backline at battle start.
-    // L1: 8 dmg / last enemy. L2: 12 dmg / last enemy. L3: 12 dmg / last two.
+    // Bernard snipes the enemy backline at battle start. Single-target at every
+    // level: a second target at L3 made the copy/re-fire amplifiers (Deer/Fox)
+    // delete the whole enemy back row pre-combat. L3 is now one big 15 hit, so
+    // amplified it removes a few key pets but never wipes the board outright.
+    // L1: 8 dmg. L2: 12 dmg. L3: 15 dmg — all to the last enemy.
     (void)ev;
     int lvl = (int)bs->teams[side].slots[slot].level;
     int dmg, targets;
     switch (lvl) {
         case 1:  dmg = 8;  targets = 1; break;
         case 2:  dmg = 12; targets = 1; break;
-        default: dmg = 12; targets = 2; break;
+        default: dmg = 15; targets = 1; break;
     }
     int enemySide = side ^ 1;
     int hit = 0;
@@ -618,7 +625,10 @@ static void pet_tiger_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEv
     if (!def) return;
     PetHandler h = def->handlers[TRIG_START_OF_BATTLE];
     if (!h) return;
-    int times = (int)bs->teams[side].slots[slot].level;  // L1=1, L2=2, L3=3
+    // Re-fire count capped at 2 (was = level, so L3 fired x3). Three extra
+    // snipes from an Alpaca neighbour deleted the whole enemy line pre-combat;
+    // x2 keeps it a punchy double-cast combo that still leaves a fight.
+    int times = mini((int)bs->teams[side].slots[slot].level, 2);  // L1=1, L2/L3=2
     // Self-fire glyph so the player sees "Reine triggered something" — the
     // re-fired handlers log at the NEIGHBOUR's slot (especially for buffers
     // where there's no other on-source visual), so without this Reine looks

@@ -361,7 +361,8 @@ void selftest_run(void) {
         check("Hen L3: both neighbours +2/+1", leftOk && rightOk);
     }
 
-    // T29: Bee L3 buffs all friends +2/+1 (the hp component is the L3 jump).
+    // T29: Bee L3 buffs all friends +2/+2 (the L3 jump now adds +2 hp so a wide
+    // board can shrug off the pre-combat snipe meta).
     {
         clear_team(&game.battle.teams[0]);
         clear_team(&game.battle.teams[1]);
@@ -372,12 +373,12 @@ void selftest_run(void) {
         trig_reset();
         TriggerEvent ev = { TRIG_START_OF_BATTLE, 0, 0, 0, 0 };
         PETS[3].handlers[TRIG_START_OF_BATTLE](&game.battle, 0, 0, &ev);
-        check("Bee L3: ally +2/+1",
+        check("Bee L3: ally +2/+2",
               game.battle.teams[0].slots[1].atk == 3 &&
-              game.battle.teams[0].slots[1].hp == 2);
+              game.battle.teams[0].slots[1].hp == 3);
     }
 
-    // T30: Hopper L3 spawns a 3/3 Hopper carrying Edelweiss (food id 1).
+    // T30: Hopper L3 spawns a 4/4 Hopper carrying Edelweiss (food id 1).
     // Enemy dies on clash so the spawned Hopper survives the simulation; we
     // can then read its food field after run_battle returns.
     {
@@ -473,7 +474,9 @@ void selftest_run(void) {
         check("Adder L3: 2 hits per ally attack", n >= 2);
     }
 
-    // T36: Bernard L3 hits the last TWO enemies for 12 dmg each at SOB.
+    // T36: Bernard L3 hits the LAST enemy for 15 dmg at SOB. Single-target at
+    // every level now (the L3 second target was removed so copy/re-fire
+    // amplifiers can't delete the whole back row pre-combat).
     {
         PetSlot p[] = { mkL(12, 1, 1, 3) };          // L3 Bernard
         PetSlot e[] = { mk(0, 1, 50), mk(0, 1, 50) };
@@ -481,8 +484,8 @@ void selftest_run(void) {
         int n = 0;
         for (int i = 0; i < game.battleLogLen; i++)
             if (game.battleLog[i].kind == BEV_ABILITY &&
-                game.battleLog[i].value == 12) n++;
-        check("Bernard L3: 12 dmg x 2 targets", n == 2);
+                game.battleLog[i].value == 15) n++;
+        check("Bernard L3: 15 dmg x 1 target", n == 1);
     }
 
     // T37: Highland L3 AoE — every enemy takes 8 on Highland's faint.
@@ -509,20 +512,21 @@ void selftest_run(void) {
 
     // T39: Ibex L3 copies BOTH neighbours' SOB. Bernard's handler reads its
     // CALLER's slot/level — so Ibex-copied Bernards run at Ibex's level (L3 ->
-    // 12 dmg, 2 targets). Two copies x two targets = 4 ABILITY events of 12.
-    // The own Bernards still fire at L1 = 8 dmg each (irrelevant to this check).
+    // 15 dmg, single target). Two copies = 2 ABILITY events of 15. The own
+    // Bernards still fire at L1 = 8 dmg each (irrelevant to this check).
     {
         PetSlot p[] = { mk(12, 1, 1), mkL(15, 3, 3, 3), mk(12, 1, 1) };
-        PetSlot e[] = { mk(0, 1, 200), mk(0, 1, 200) };  // 2 targets needed
+        PetSlot e[] = { mk(0, 1, 200), mk(0, 1, 200) };
         run_battle(p, 3, e, 2);
         int n = 0;
         for (int i = 0; i < game.battleLogLen; i++)
             if (game.battleLog[i].kind == BEV_ABILITY &&
-                game.battleLog[i].value == 12) n++;
-        check("Ibex L3: 4 x 12 dmg from copies", n == 4);
+                game.battleLog[i].value == 15) n++;
+        check("Ibex L3: 2 x 15 dmg from copies", n == 2);
     }
 
-    // T40: Reine L3 re-fires the right ally x3 (so Bernard fires 4 total).
+    // T40: Reine L3 re-fires the right ally x2 (capped), so Bernard fires 3
+    // total (1 own + 2 re-fired). Was x3 / 4-total before the amplifier cap.
     {
         PetSlot p[] = { mkL(16, 4, 1, 3), mk(12, 1, 1) };
         PetSlot e[] = { mk(0, 1, 100) };
@@ -531,7 +535,7 @@ void selftest_run(void) {
         for (int i = 0; i < game.battleLogLen; i++)
             if (game.battleLog[i].kind == BEV_ABILITY &&
                 game.battleLog[i].value == 8) n++;
-        check("Reine L3: 4 total Bernard fires", n == 4);
+        check("Reine L3: 3 total Bernard fires", n == 3);
     }
 
     // T41: Bull L3 triggers on ANY tier buy (T3 here) and grants +2/+1.
@@ -592,7 +596,7 @@ void selftest_run(void) {
         check("Food schedule: turn 1 only T1 foods", onlyT1);
     }
 
-    // T_Haflinger_L3: Haflinger L3 gives +3/+2 to the summoned ally.
+    // T_Haflinger_L3: Haflinger L3 gives +3/+3 to the summoned ally.
     {
         clear_team(&game.player);
         game.player.slots[0] = mkL(8, 2, 2, 3);      // L3 Haflinger
@@ -602,9 +606,9 @@ void selftest_run(void) {
         game.shop.pets[0] = 0;                       // Marmot (base 2/2)
         game.shop.gold = 100;
         shop_try_buy_pet(0, 1);
-        // Marmot base 2/2, +3/+2 = 5/4.
-        check("Haflinger L3: summon +3/+2",
-              game.player.slots[1].atk == 5 && game.player.slots[1].hp == 4);
+        // Marmot base 2/2, +3/+3 = 5/5.
+        check("Haflinger L3: summon +3/+3",
+              game.player.slots[1].atk == 5 && game.player.slots[1].hp == 5);
     }
 
     // T_Adder_DeadTarget: Adder should NOT fire on an ally attack that
@@ -763,9 +767,10 @@ void selftest_run(void) {
     // T49: Deer/Fox re-fire is attack-order independent (audit guard). T40
     // covers Fox firing BEFORE its neighbor (Fox atk 4 > Bernard atk 1). Here
     // Bernard's atk is higher, so it takes its OWN start-of-battle turn first
-    // and Fox re-fires it afterward — the total must still be 1 own + 3
-    // re-fires = 4 snipes, proving the direct-call re-fire never double-counts
-    // regardless of which pet the attack-ordered drain reaches first.
+    // and Fox re-fires it afterward — the total must still be 1 own + 2
+    // re-fires = 3 snipes (Fox is capped at x2), proving the direct-call
+    // re-fire never double-counts regardless of which pet the attack-ordered
+    // drain reaches first.
     {
         PetSlot p[] = { mkL(16,1,1,3), mk(12,10,80) };   // Fox L3 (low atk), Bernard (high atk)
         PetSlot e[] = { mk(0,1,200) };                   // tanky soak so every snipe lands
@@ -774,7 +779,7 @@ void selftest_run(void) {
         for (int i = 0; i < game.battleLogLen; i++)
             if (game.battleLog[i].kind == BEV_ABILITY &&
                 game.battleLog[i].value == 8) n8++;
-        check("Deer/Fox: re-fire count is attack-order independent", n8 == 4);
+        check("Deer/Fox: re-fire count is attack-order independent", n8 == 3);
     }
 
     DLOG("SELFTEST: %d passed, %d failed", g_pass, g_fail);
