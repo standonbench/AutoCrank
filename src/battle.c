@@ -419,6 +419,10 @@ void battle_playback_step(void) {
     }
 
     if (game.battlePlayhead >= game.battleLogLen) {
+        // Tally the win/lost life now (once) so the result screen opens on the
+        // updated count and can animate it — the heart emptying + shatter on a
+        // loss, the freshly-earned segment pulse on a win.
+        game_apply_battle_result();
         game.state = STATE_RESULT;
         game.resultTimer = 0;
     }

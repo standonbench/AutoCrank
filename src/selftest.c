@@ -290,13 +290,16 @@ void selftest_run(void) {
               game.player.slots[0].atk == 3 && game.player.slots[0].hp == 4);
     }
 
-    // T24: Winning the 10th battle reaches the victory state.
+    // T24: Winning the 10th battle reaches the victory state. Outcome is
+    // applied at result-open (game_apply_battle_result), then dismissed.
     {
         clear_team(&game.player);
         game.inRun = true;
         game.wins = WINS_TO_VICTORY - 1;
         game.lives = 5;
         game.battleResult = 0;
+        game.battle.inBattle = true;
+        game_apply_battle_result();           // wins -> 10
         game_after_battle();
         check("10th win -> victory", game.state == STATE_VICTORY);
     }
@@ -308,8 +311,31 @@ void selftest_run(void) {
         game.wins = 3;
         game.lives = 1;
         game.battleResult = 1;
+        game.battle.inBattle = true;
+        game_apply_battle_result();           // lives -> 0
         game_after_battle();
         check("Last life lost -> game over", game.state == STATE_GAMEOVER);
+    }
+
+    // T25b: The win/life tally lands when the result screen OPENS (so it can
+    // show + animate the change), not when it's dismissed, and applies once.
+    // Guards the "defeat didn't visibly cost a life" regression.
+    {
+        clear_team(&game.player);
+        game.inRun = true;
+        game.wins = 4; game.lives = 5;
+        game.battleResult = 1;                // loss
+        game.battle.inBattle = true;
+        game_apply_battle_result();
+        check("Loss deducts a life at result-open", game.lives == 4 && game.wins == 4);
+        game_apply_battle_result();           // stray second call
+        check("Result apply is one-shot", game.lives == 4);
+
+        game.wins = 4; game.lives = 5;
+        game.battleResult = 0;                // win
+        game.battle.inBattle = true;
+        game_apply_battle_result();
+        check("Win tallies at result-open", game.wins == 5 && game.lives == 5);
     }
 
     // =======================================================================

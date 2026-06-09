@@ -1,4 +1,5 @@
 #include "game.h"
+#include "theme.h"
 #include <stdio.h>
 
 // ---------------------------------------------------------------------------
@@ -102,6 +103,8 @@ static void menu_cheat_battle(void* userdata) {
             if (game.state == STATE_BATTLE || game.state == STATE_PRE_BATTLE ||
                 game.state == STATE_RESULT) {
                 game.battleResult = 0;
+                game.battle.inBattle = true;   // arm the one-shot apply guard
+                game_apply_battle_result();     // tally the win now
                 game.state = STATE_RESULT;
                 game.resultTimer = 61;
             }
@@ -299,6 +302,7 @@ void game_start_run(void)
 
     shop_init_run();
     shop_refill();
+    th_wipe_start();
     game.state = STATE_SHOP;
     save_write();
 }
@@ -344,12 +348,19 @@ void game_advance_to_battle(void)
     game.battle.teams[0] = game.battle.initial[0];
     game.battle.teams[1] = game.battle.initial[1];
 
+    th_wipe_start();
     game.state = STATE_PRE_BATTLE;
     game.preBattleTimer = 90;       // 3.0s: 30f intro + 60f hold/exit
 }
 
-void game_after_battle(void)
+// Apply the battle outcome to the run — win/life tally, roster achievement
+// ticks, one-shot food cleanup — and persist it. Called the moment the result
+// screen opens (from battle_playback_step) so the screen shows the new win
+// count / lost life and can animate the change. The inBattle flag guards it to
+// exactly once per battle.
+void game_apply_battle_result(void)
 {
+    if (!game.battle.inBattle) return;
     game.battle.inBattle = false;
 
     // Salt Lick is one-battle-only — clear the flag and consume the food
@@ -384,12 +395,14 @@ void game_after_battle(void)
     }
     // Draw: no change
 
-    // Restore HP for surviving pets to base+permanent (battle damage doesn't persist)
-    // The player team is the source of truth, not battle.teams[0].
-    // (battle.teams[0] was a snapshot.)
-
     save_write();
+}
 
+// Dismiss the result screen and advance to the next state. The outcome was
+// already applied (and saved) by game_apply_battle_result when the screen
+// opened, so this only routes to victory / game over / the next shop.
+void game_after_battle(void)
+{
     if (game.wins >= WINS_TO_VICTORY) {
         hof_record_win();
         game.state = STATE_VICTORY;
@@ -405,6 +418,7 @@ void game_after_battle(void)
         game.shopRollAnim = 0;
         game.pendingFoodSlot = 0xFF;
         shop_popup_clear();
+        th_wipe_start();
         game.state = STATE_SHOP;
     }
 }
@@ -456,6 +470,29 @@ static int first_present_team_slot(void) {
         if (game.player.slots[i].id != EMPTY_PET) return i;
     }
     return -1;
+}
+
+// Preview what buying `petId` would do — mirrors the dst logic in
+// shop_action_a (combine first, else fill an empty slot) plus the XP/level
+// math from shop_try_buy_pet, so the shop can telegraph it before the buy.
+CombinePreview shop_combine_preview(uint8_t petId) {
+    CombinePreview p = { -1, false, false, 1, 0, 0 };
+    if (petId == EMPTY_PET) return p;
+    int dst = first_combinable_slot(petId);
+    if (dst >= 0) {
+        PetSlot* s = &game.player.slots[dst];
+        uint8_t needed = (uint8_t)pet_xp_for_level((uint8_t)(s->level + 1));
+        p.dstSlot   = (int8_t)dst;
+        p.isCombine = true;
+        p.xpAfter   = (uint8_t)(s->xp + 1);
+        p.xpNeeded  = needed;
+        if (p.xpAfter >= needed) { p.levelsUp = true;  p.resultLevel = (uint8_t)(s->level + 1); }
+        else                     { p.levelsUp = false; p.resultLevel = s->level; }
+        return p;
+    }
+    dst = first_empty_team_slot();
+    if (dst >= 0) { p.dstSlot = (int8_t)dst; }   // fresh buy into an empty slot
+    return p;                                     // else dstSlot stays -1: team full
 }
 
 static void shop_action_a(void) {
@@ -688,14 +725,14 @@ int update(void* userdata)
     case STATE_SELFTEST: {
         PDButtons c2, p2, r2;
         pd->system->getButtonState(&c2, &p2, &r2);
-        if (p2 & kButtonB) game.state = STATE_TITLE;
+        if (p2 & kButtonB) { th_wipe_start(); game.state = STATE_TITLE; }
         selftest_render();
         break;
     }
     case STATE_GALLERY: {
         PDButtons c3, p3, r3;
         pd->system->getButtonState(&c3, &p3, &r3);
-        if (p3 & kButtonB) game.state = STATE_TITLE;
+        if (p3 & kButtonB) { th_wipe_start(); game.state = STATE_TITLE; }
         ui_gallery_render();
         break;
     }
@@ -712,6 +749,9 @@ int update(void* userdata)
         ui_help_render();
         break;
     }
+
+    // Scene-change curtain — always the very last draw of the frame.
+    th_wipe_draw();
 
     if (g_debugOverlay) pd->system->drawFPS(SCREEN_W - 22, 2);
     return 1;

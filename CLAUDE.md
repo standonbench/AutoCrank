@@ -23,6 +23,7 @@ Playdate: ARM Cortex-M7, 400×240, 1-bit B/W, 30fps.
 | `src/game.h` | All structs, enums, constants, GFX_* macros, extern decls |
 | `src/game.c` | State machine, top-level update(), shop input handling |
 | `src/main.c` | eventHandler, RNG seed, 30fps lock |
+| `src/theme.c/.h` | Shared 1-bit design system ("scherenschnitt festival"): dither swatches, chamfered panels/chips/plank buttons, A/B-glyph hint bar, motifs (rosette, pennant garland, edelweiss, summit meter), layered `th_backdrop`, ridge-curtain scene wipe |
 | `src/render.c` | Top bar, shop screen, battle screen + projectile/debris/shake FX |
 | `src/creatures.c` | Procedural 1-bit creature art (fallback when a PNG is missing) |
 | `src/images.c` | LCDBitmap loader for pet sprites (foods are procedural) |
@@ -35,7 +36,7 @@ Playdate: ARM Cortex-M7, 400×240, 1-bit B/W, 30fps.
 | `src/names.c/.h` | Team-name word pools (`team_name_str`) |
 | `src/save.c` | Versioned save (V4 = lifetime stats + run resume + names + hall of fame) |
 | `src/sound.c` | Synth SFX (implemented). `sfx_attack` is the combat-hit thud |
-| `src/selftest.c` | 56-case mechanics self-test (Title→TEST, or `tools/runtests.sh`) |
+| `src/selftest.c` | 59-case mechanics self-test (Title→TEST, or `tools/runtests.sh`) |
 | `src/mathutil.h` | XORShift RNG, clamp helpers |
 | `src/debug.h` | DLOG/ASSERT (off in release) |
 | `tools/hosttest.c` | Host harness: stub `pd` + `main` to run selftest_run() natively |

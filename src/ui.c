@@ -1,279 +1,66 @@
 #include "game.h"
+#include "theme.h"
 #include <stdio.h>
 
-// Forward declarations for the shared animation helpers (their definitions
-// live below, near the pre-battle intro that first introduced them).
-static int   ease_out(int from, int to, int t, int dur);
-static float easef_out_back(float p, float overshoot);
-static void  draw_banner_card(int x, int y, int w, int h);
-static void  draw_banner_card_inverted(int x, int y, int w, int h);
-static void  draw_scaled_text(const char* s, LCDFont* font, int cx, int cy,
-                              float scale, bool invertColor);
-static void  draw_flash_overlay(bool on);
+// ===========================================================================
+// Menu / end-screen presentation — scherenschnitt festival styling.
+// All chrome comes from theme.c; this file owns layout + choreography.
+// ===========================================================================
 
 // Onboarding flow: true when how-to-play was opened from PLAY on a first run,
 // so dismissing it continues into the team-name picker rather than the title.
 static bool g_helpThenPlay = false;
 
-// ---------------------------------------------------------------------------
-// Title screen — menu: PLAY / HALL / ROSTER / TEST / HELP (titleCursor 0..4).
-// ---------------------------------------------------------------------------
-void ui_title_update(void) {
-    PDButtons cur, prs, rel;
-    pd->system->getButtonState(&cur, &prs, &rel);
-    game.titleBlinkTimer++;
-    if (prs & kButtonUp)
-        game.titleCursor = (uint8_t)((game.titleCursor + 4) % 5);
-    if (prs & kButtonDown)
-        game.titleCursor = (uint8_t)((game.titleCursor + 1) % 5);
-    if (prs & kButtonA) {
-        switch (game.titleCursor) {
-        case 0:                                   // PLAY
-            // First-ever PLAY shows the how-to-play once, then continues into
-            // the run; afterwards it goes straight to the team-name picker.
-            if (!(game.settings & SETTING_HELP_SEEN)) {
-                g_helpThenPlay = true;
-                game.state = STATE_HELP;
-            } else {
-                ui_team_name_enter();
-            }
-            break;
-        case 1: ui_hof_enter();        break;     // HALL OF FAME
-        case 2: game.state = STATE_GALLERY; break;
-        case 3:
-            selftest_run();
-            game.state = STATE_SELFTEST;
-            break;
-        case 4:                                   // HELP (re-readable any time)
-            g_helpThenPlay = false;
-            game.state = STATE_HELP;
-            break;
-        }
-    }
+// Integer ease-out over a frame window (shared shorthand).
+static int ease_out(int from, int to, int t, int dur) {
+    if (t <= 0) return from;
+    if (t >= dur) return to;
+    return th_lerpi(from, to, th_ease_out((float)t / (float)dur));
 }
 
-// ---------------------------------------------------------------------------
-// Roster gallery — all 18 creatures in a grid + achievement badges.
-// A pet earns the outline badge when first taken to L3; the badge fills
-// in once a battle has been won with that pet on the team at L3.
-// ---------------------------------------------------------------------------
-static void draw_roster_badge(int cx, int cy, bool earned) {
-    // White chip with a black ring; inner mark shows the progress tier.
-    GFX_ELLIPSE(cx - 4, cy - 4, 9, 9, kColorWhite);
-    pd->graphics->drawEllipse(cx - 4, cy - 4, 9, 9, 1, 0, 360, kColorBlack);
-    if (earned) {
-        // Filled diamond — L3 + at least one win
-        pd->graphics->fillTriangle(cx, cy - 3, cx + 3, cy,
-                                   cx, cy + 3, kColorBlack);
-        pd->graphics->fillTriangle(cx, cy - 3, cx, cy + 3,
-                                   cx - 3, cy, kColorBlack);
-    } else {
-        // Small dot — reached L3 but no win yet
-        GFX_ELLIPSE(cx - 1, cy - 1, 3, 3, kColorBlack);
-    }
-}
-
-void ui_gallery_render(void) {
-    GFX_FILL(0, 0, SCREEN_W, SCREEN_H, kColorWhite);
-    GFX_FILL(0, 0, SCREEN_W, 18, kColorBlack);
-    pd->graphics->setDrawMode(kDrawModeFillWhite);
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    pd->graphics->drawText("ROSTER  -  18 alpine creatures", 30,
-                           kASCIIEncoding, 8, 2);
-    pd->graphics->setDrawMode(kDrawModeCopy);
-
-    // 6 columns x 3 rows, each cell 64 wide x 70 tall
-    for (int i = 0; i < PET_COUNT; i++) {
-        int col = i % 6, row = i / 6;
-        int cx = 8 + col * 64;
-        int cy = 24 + row * 70;
-        GFX_FILL(cx, cy, 60, 50, kColorWhite);
-        GFX_RECT(cx, cy, 60, 50, kColorBlack);
-        draw_creature((uint8_t)i, cx + 14, cy + 9);
-        const char* nm = pet_name((uint8_t)i);
-        if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-        int w = pd->graphics->getTextWidth(game.fontSmall, nm, strlen(nm),
-                                           kASCIIEncoding, 0);
-        pd->graphics->drawText(nm, strlen(nm), kASCIIEncoding,
-                               cx + (60 - w) / 2, cy + 54);
-
-        // Achievement badge top-right.
-        if (game.petWinsAtMax[i] >= 1) {
-            draw_roster_badge(cx + 51, cy + 6, true);
-        } else if (game.petMaxLevel[i] >= MAX_PET_LEVEL) {
-            draw_roster_badge(cx + 51, cy + 6, false);
-        }
-    }
-    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-    pd->graphics->drawText("B: back", 7, kASCIIEncoding, 8, SCREEN_H - 13);
-}
-
-// Draw text horizontally centered on the screen at row y.
-static void title_text_centered(const char* s, LCDFont* font, int y) {
-    if (font) pd->graphics->setFont(font);
-    int w = font ? pd->graphics->getTextWidth(font, s, strlen(s), kASCIIEncoding, 0)
-                  : (int)strlen(s) * 6;
-    pd->graphics->drawText(s, strlen(s), kASCIIEncoding, (SCREEN_W - w) / 2, y);
-}
-
-// A small five-petal edelweiss, white petals with a black centre.
-static void draw_flower(int cx, int cy, int r) {
-    for (int i = 0; i < 5; i++) {
-        float a = i * (2.0f * PI_F / 5.0f) - PI_F / 2.0f;
-        int px = cx + (int)(cosf(a) * r);
-        int py = cy + (int)(sinf(a) * r);
-        GFX_ELLIPSE(px - 3, py - 3, 7, 7, kColorWhite);
-        pd->graphics->drawEllipse(px - 3, py - 3, 7, 7, 1, 0, 360, kColorBlack);
-    }
-    GFX_ELLIPSE(cx - 2, cy - 2, 5, 5, kColorBlack);
-}
-
-// 50% checker — a soft drop-shadow tone.
-static LCDPattern UI_SHADE = {
-    0xAA,0x55,0xAA,0x55,0xAA,0x55,0xAA,0x55,
-    0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF
-};
-
-// Text with a 1px white halo, drawn at (x, y). Stays legible over the photo.
-static void draw_text_halo(const char* s, LCDFont* font, int x, int y) {
-    if (font) pd->graphics->setFont(font);
-    pd->graphics->setDrawMode(kDrawModeFillWhite);
-    for (int ox = -1; ox <= 1; ox++)
-        for (int oy = -1; oy <= 1; oy++)
-            pd->graphics->drawText(s, strlen(s), kASCIIEncoding, x + ox, y + oy);
-    pd->graphics->setDrawMode(kDrawModeFillBlack);
-    pd->graphics->drawText(s, strlen(s), kASCIIEncoding, x, y);
+// One-frame full-screen invert — the "impact flash".
+static void draw_flash_overlay(bool on) {
+    if (!on) return;
+    pd->graphics->setDrawMode(kDrawModeInverted);
+    GFX_FILL(0, 0, SCREEN_W, SCREEN_H, kColorBlack);
     pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
-// Centred text with a white halo — stays legible over the mountains.
-static void draw_text_halo_centered(const char* s, LCDFont* font, int y) {
-    if (font) pd->graphics->setFont(font);
-    int w = pd->graphics->getTextWidth(font, s, strlen(s), kASCIIEncoding, 0);
-    int x = (SCREEN_W - w) / 2;
-    pd->graphics->setDrawMode(kDrawModeFillWhite);
-    for (int ox = -1; ox <= 1; ox++)
-        for (int oy = -1; oy <= 1; oy++)
-            pd->graphics->drawText(s, strlen(s), kASCIIEncoding, x + ox, y + oy);
-    pd->graphics->setDrawMode(kDrawModeFillBlack);
-    pd->graphics->drawText(s, strlen(s), kASCIIEncoding, x, y);
-    pd->graphics->setDrawMode(kDrawModeCopy);
-}
-
-// A triangular pennant on a thin pole, rising above the title banner.
-static void draw_pennant(int x, int topY, int poleH, bool right) {
-    GFX_LINE(x, topY, x, topY + poleH, 2, kColorBlack);
-    int d = right ? 1 : -1;
-    pd->graphics->fillTriangle(x, topY, x + d * 13, topY + 4,
-                               x, topY + 10, kColorBlack);
-}
-
-// A black pine with a white halo so it reads over both pasture and forest.
-static void draw_pine(int cx, int baseY, int h) {
-    int w = (h * 9) / 20;
-    int by[3], ay[3], tw[3];
-    for (int t = 0; t < 3; t++) {
-        tw[t] = (int)(w * (1.0f - 0.30f * t));
-        by[t] = baseY - 5 - (int)(h * 0.34f * t);
-        ay[t] = by[t] - (int)(h * 0.52f);
-    }
-    for (int t = 0; t < 3; t++)
-        pd->graphics->fillTriangle(cx - tw[t] - 3, by[t] + 3, cx, ay[t] - 4,
-                                   cx + tw[t] + 3, by[t] + 3, kColorWhite);
-    for (int t = 0; t < 3; t++)
-        pd->graphics->fillTriangle(cx - tw[t], by[t], cx, ay[t],
-                                   cx + tw[t], by[t], kColorBlack);
-    GFX_FILL(cx - 2, baseY - 7, 5, 9, kColorWhite);
-    GFX_RECT(cx - 2, baseY - 7, 5, 9, kColorBlack);
-}
-
-// A little Alpine chalet — white walls, a snow-capped roof, door & windows.
-static void draw_chalet(int x, int baseY) {
-    int bw = 48, bh = 30, bx = x, by = baseY - bh;
-    GFX_FILL(bx, by, bw, bh, kColorWhite);
-    GFX_RECT(bx, by, bw, bh, kColorBlack);
-    GFX_RECT(bx + 1, by + 1, bw - 2, bh - 2, kColorBlack);
-    // roof — wide overhanging triangle
-    int apexY = by - 20, rcx = bx + bw / 2;
-    pd->graphics->fillTriangle(bx - 9, by + 2, rcx, apexY,
-                               bx + bw + 9, by + 2, kColorBlack);
-    GFX_LINE(bx - 9, by + 2, bx + bw + 9, by + 2, 3, kColorBlack);
-    // ridge snowcap
-    pd->graphics->fillTriangle(rcx, apexY, rcx - 8, apexY + 11,
-                               rcx + 8, apexY + 11, kColorWhite);
-    GFX_LINE(rcx, apexY, rcx - 8, apexY + 11, 1, kColorBlack);
-    GFX_LINE(rcx, apexY, rcx + 8, apexY + 11, 1, kColorBlack);
-    // door
-    int dw = 12, dh = 14, dx = bx + bw / 2 - dw / 2;
-    GFX_FILL(dx, baseY - dh, dw, dh, kColorBlack);
-    GFX_ELLIPSE(dx + dw - 4, baseY - dh / 2 - 1, 3, 3, kColorWhite);
-    // two windows with cross mullions
-    for (int i = 0; i < 2; i++) {
-        int wx = bx + 6 + i * (bw - 24), wy = by + 6;
-        GFX_FILL(wx, wy, 11, 11, kColorWhite);
-        GFX_RECT(wx, wy, 11, 11, kColorBlack);
-        GFX_LINE(wx + 5, wy, wx + 5, wy + 10, 1, kColorBlack);
-        GFX_LINE(wx, wy + 5, wx + 10, wy + 5, 1, kColorBlack);
+// Deterministic confetti rain (win celebrations). Stateless: dot index +
+// frame count fully determine every position, so it loops cleanly.
+static void draw_confetti(int elapsed) {
+    const int N = 36;
+    for (int i = 0; i < N; i++) {
+        int x = ((i * 1657) % SCREEN_W);
+        int speed = 2 + ((i * 97) % 4);
+        int phase = (i * 213) % 90;
+        int t = (elapsed + phase) % 120;
+        int y = (t * speed) % (SCREEN_H + 8) - 4;
+        if ((i & 1) == 0)
+            GFX_FILL(x, y, 2, 2, kColorBlack);
+        else
+            GFX_FILL(x, y, 1, 3, kColorBlack);
     }
 }
 
-// A distant gull — a simple double-arc silhouette.
-static void draw_bird(int cx, int cy) {
-    GFX_LINE(cx - 7, cy,     cx - 3, cy - 5, 2, kColorBlack);
-    GFX_LINE(cx - 3, cy - 5, cx,     cy - 1, 2, kColorBlack);
-    GFX_LINE(cx,     cy - 1, cx + 3, cy - 5, 2, kColorBlack);
-    GFX_LINE(cx + 3, cy - 5, cx + 7, cy,     2, kColorBlack);
-}
-
-// A spotted toadstool nestled in the grass.
-static void draw_mushroom(int cx, int baseY) {
-    GFX_FILL(cx - 3, baseY - 9, 7, 9, kColorWhite);
-    GFX_RECT(cx - 3, baseY - 9, 7, 9, kColorBlack);
-    GFX_ELLIPSE(cx - 9, baseY - 16, 19, 13, kColorBlack);
-    GFX_ELLIPSE(cx - 5, baseY - 13, 4, 4, kColorWhite);
-    GFX_ELLIPSE(cx + 2, baseY - 14, 3, 3, kColorWhite);
-}
-
-// One signpost plank — a left-pointing wooden arrow sign.
-static void draw_sign_plank(int cy, const char* label, bool selected) {
-    int bodyL = 214, bodyR = 320, top = cy - 15, bot = cy + 15;
-    int tipX = bodyL - 15;
-    LCDColor fill = selected ? kColorBlack : kColorWhite;
-    // drop shadow
-    pd->graphics->fillTriangle(tipX + 3, cy + 4, bodyL + 3, top + 4,
-                               bodyL + 3, bot + 4, (LCDColor)UI_SHADE);
-    GFX_FILL(bodyL + 3, top + 4, bodyR - bodyL, bot - top, (LCDColor)UI_SHADE);
-    // body
-    pd->graphics->fillTriangle(tipX, cy, bodyL, top, bodyL, bot, fill);
-    GFX_FILL(bodyL, top, bodyR - bodyL, bot - top, fill);
-    // outline — top / right / bottom / two point edges
-    GFX_LINE(bodyL, top, bodyR, top, 2, kColorBlack);
-    GFX_LINE(bodyL, bot, bodyR, bot, 2, kColorBlack);
-    GFX_LINE(bodyR, top, bodyR, bot, 2, kColorBlack);
-    GFX_LINE(bodyL, top, tipX, cy, 2, kColorBlack);
-    GFX_LINE(bodyL, bot, tipX, cy, 2, kColorBlack);
-    // woodgrain + nail heads on the light planks
-    if (!selected) {
-        GFX_LINE(bodyL + 8, top + 8, bodyR - 8, top + 8, 1, kColorBlack);
-        GFX_LINE(bodyL + 8, bot - 8, bodyR - 8, bot - 8, 1, kColorBlack);
-        pd->graphics->drawEllipse(bodyR - 14, top + 6, 5, 5, 1, 0, 360,
-                                  kColorBlack);
-        pd->graphics->drawEllipse(bodyR - 14, bot - 11, 5, 5, 1, 0, 360,
-                                  kColorBlack);
+// Deterministic snowfall (the long walk home). White flakes over a dimmed
+// scene; slight sinusoidal drift so it reads as snow, not static.
+static void draw_snow(int elapsed) {
+    const int N = 28;
+    for (int i = 0; i < N; i++) {
+        int x0 = (i * 149) % SCREEN_W;
+        int speed = 1 + (i % 2);
+        int phase = (i * 331) % 160;
+        int t = elapsed + phase;
+        int y = ((t * speed) % (SCREEN_H + 10)) - 5;
+        int x = x0 + (int)(sinf((float)t * 0.045f + (float)i) * 5.0f);
+        GFX_FILL(x, y, 2, 2, kColorWhite);
+        GFX_RECT(x - 1, y - 1, 4, 4, kColorBlack);
     }
-    // label
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    int tw = pd->graphics->getTextWidth(game.fontBold, label, strlen(label),
-                                        kASCIIEncoding, 0);
-    int tx = (bodyL + bodyR) / 2 - tw / 2 - 3;
-    pd->graphics->setDrawMode(selected ? kDrawModeFillWhite : kDrawModeFillBlack);
-    pd->graphics->drawText(label, strlen(label), kASCIIEncoding, tx, cy - 9);
-    pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
-// Draw a pet sprite with a 1px white halo so it stays legible over the
-// mountain photo. Title-screen-only — every other place uses
-// draw_creature_xform directly to keep the perf cost off the hot path.
+// Draw a pet sprite with a 1px white halo so it stays legible over busy
+// backdrops (title scene). Off the hot path.
 static void draw_creature_haloed(uint8_t petId, int cx, int cy,
                                  float scale, bool flip) {
     LCDBitmap* sprite = image_pet(petId);
@@ -290,77 +77,128 @@ static void draw_creature_haloed(uint8_t petId, int cx, int cy,
     draw_creature_xform(petId, cx, cy, scale, 0.0f, flip);
 }
 
-// Small floating-rectangle menu card. Centered on (cx, cy), ~70×20 px.
-// Selected: filled black, white text. Unselected: white fill, black border,
-// 2px drop shadow.
-static void draw_menu_card(int cx, int cy, const char* label, bool selected) {
-    const int w = 70, h = 20;
-    int x = cx - w / 2, y = cy - h / 2;
-    if (!selected) {
-        GFX_FILL(x + 2, y + 2, w, h, kColorBlack);                       // shadow
-        GFX_FILL(x, y, w, h, kColorWhite);
-        GFX_RECT(x, y, w, h, kColorBlack);
-    } else {
-        GFX_FILL(x, y, w, h, kColorBlack);
+// ---------------------------------------------------------------------------
+// Title screen — a festival poster. Signpost menu on the right, garlanded
+// slab banner up top, grazing herd below, one calf forever walking home.
+// titleCursor 0..4 = PLAY / HALL / ROSTER / TEST / HELP.
+// ---------------------------------------------------------------------------
+void ui_title_update(void) {
+    PDButtons cur, prs, rel;
+    pd->system->getButtonState(&cur, &prs, &rel);
+    game.titleBlinkTimer++;
+    if (prs & kButtonUp)
+        game.titleCursor = (uint8_t)((game.titleCursor + 4) % 5);
+    if (prs & kButtonDown)
+        game.titleCursor = (uint8_t)((game.titleCursor + 1) % 5);
+    if (prs & kButtonA) {
+        switch (game.titleCursor) {
+        case 0:                                   // PLAY
+            // First-ever PLAY shows the how-to-play once, then continues into
+            // the run; afterwards it goes straight to the team-name picker.
+            if (!(game.settings & SETTING_HELP_SEEN)) {
+                g_helpThenPlay = true;
+                th_wipe_start();
+                game.state = STATE_HELP;
+            } else {
+                ui_team_name_enter();
+            }
+            break;
+        case 1: ui_hof_enter();        break;     // HALL OF FAME
+        case 2:
+            th_wipe_start();
+            game.state = STATE_GALLERY;
+            break;
+        case 3:
+            selftest_run();
+            game.state = STATE_SELFTEST;
+            break;
+        case 4:                                   // HELP (re-readable any time)
+            g_helpThenPlay = false;
+            th_wipe_start();
+            game.state = STATE_HELP;
+            break;
+        }
     }
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    int tw = pd->graphics->getTextWidth(game.fontBold, label, strlen(label),
-                                        kASCIIEncoding, 0);
-    int tx = cx - tw / 2 - 2;
-    pd->graphics->setDrawMode(selected ? kDrawModeFillWhite : kDrawModeFillBlack);
-    pd->graphics->drawText(label, strlen(label), kASCIIEncoding, tx, cy - 8);
-    pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
 void ui_title_render(void) {
-    // --- backdrop: mountain photo (with procedural fallback if asset missing) ---
+    // Entry clock: detects (re)entry to the title so the furniture can slide
+    // in. A gap in frameCount means we were on another screen last frame.
+    static uint32_t lastFrame = 0;
+    static int entry = 1000;
+    if (game.frameCount != lastFrame + 1) entry = 0;
+    else if (entry < 1000) entry++;
+    lastFrame = game.frameCount;
+
+    // --- backdrop: mountain photo if shipped, else the rich paper-cut scene
     LCDBitmap* bg = image_title_bg();
     if (bg) {
         pd->graphics->drawBitmap(bg, 0, 0, kBitmapUnflipped);
     } else {
-        render_alpine_bg(150);
+        th_backdrop(150, TH_BG_RICH);
+        th_chalet(16, 196);
+        th_pine(212, 178, 26);
+        th_pine(110, 232, 30);
     }
 
-    // --- gulls drifting over the ridge ---
-    draw_bird(46, 72);
-    draw_bird(150, 60);
-    draw_bird(96, 88);
-
-    // --- three cows spread across the foreground (haloed for legibility) ---
+    // --- grazing herd (haloed for legibility over either backdrop) ---
     const float S = 1.4f;
-    draw_creature_haloed(13,  55, 175, S, false);   // Highland, left
-    draw_creature_haloed( 5, 155, 195, S, true);    // Calf, middle, facing left
-    draw_creature_haloed(13, 250, 170, S, false);   // Highland, right
+    draw_creature_haloed(13,  60, 175, S, false);   // Highland, left
+    draw_creature_haloed( 5, 158, 196, S, true);    // Calf, middle, facing left
+    draw_creature_haloed(13, 252, 172, S, false);   // Highland, right
 
-    // --- floating menu cards (right-side stack) ---
-    draw_menu_card(332,  86, "PLAY",   game.titleCursor == 0);
-    draw_menu_card(332, 110, "HALL",   game.titleCursor == 1);
-    draw_menu_card(332, 134, "ROSTER", game.titleCursor == 2);
-    draw_menu_card(332, 158, "TEST",   game.titleCursor == 3);
-    draw_menu_card(332, 182, "HELP",   game.titleCursor == 4);
+    // --- one tiny calf on an endless walk across the far pasture ---
+    {
+        int cycle = (int)(game.frameCount % 2600u);
+        int wx = SCREEN_W + 30 - (int)((float)cycle * 0.19f);
+        int wy = 157 + (int)(sinf((float)game.frameCount * 0.30f) * 1.2f);
+        draw_creature_haloed(5, wx, wy, 0.8f, true);
+    }
 
-    // --- title banner with pennants ---
-    if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
-    const char* T = "AUTOCRANK";
-    int tW = pd->graphics->getTextWidth(game.fontLarge, T, strlen(T),
-                                        kASCIIEncoding, 0);
-    int bw = tW + 52, bh = 34, bx = (SCREEN_W - bw) / 2, by = 20;
-    GFX_FILL(bx + 5, by + 6, bw, bh, (LCDColor)UI_SHADE);          // shadow
-    draw_pennant(bx + 26,     by - 13, 16, false);                 // flags
-    draw_pennant(bx + bw / 2, by - 16, 18, true);
-    draw_pennant(bx + bw - 26, by - 13, 16, true);
-    pd->graphics->fillTriangle(bx, by + bh - 12, bx, by + bh,      // ribbon tails
-                               bx - 14, by + bh + 5, kColorBlack);
-    pd->graphics->fillTriangle(bx + bw, by + bh - 12, bx + bw, by + bh,
-                               bx + bw + 14, by + bh + 5, kColorBlack);
-    GFX_FILL(bx, by, bw, bh, kColorBlack);                         // banner
-    GFX_RECT(bx + 3, by + 3, bw - 6, bh - 6, kColorWhite);
-    pd->graphics->setDrawMode(kDrawModeFillWhite);
-    pd->graphics->drawText(T, strlen(T), kASCIIEncoding,
-                           (SCREEN_W - tW) / 2, by + 7);
-    pd->graphics->setDrawMode(kDrawModeCopy);
-    draw_text_halo_centered("- combat des reines -", game.fontSmall,
-                            by + bh + 2);
+    // --- signpost menu: a pole of arrow planks pointing into the valley ---
+    {
+        static const char* items[5] = { "PLAY", "HALL", "ROSTER", "TEST", "HELP" };
+        int poleX = 372;
+        GFX_FILL(poleX, 58, 5, 166, kColorBlack);                 // pole
+        pd->graphics->fillTriangle(poleX - 2, 58, poleX + 7, 58,
+                                   poleX + 2, 50, kColorBlack);   // cap
+        for (int i = 0; i < 5; i++) {
+            int cy = 78 + i * 30;
+            // staggered slide-in from the right on entry
+            int slide = 0;
+            if (entry < 60) {
+                float p = ((float)entry - (float)i * 3.0f) / 14.0f;
+                slide = th_lerpi(130, 0, th_ease_out(p));
+            }
+            bool sel = (game.titleCursor == i);
+            int nudge = sel ? -4 : 0;
+            th_sign_plank(286 + slide + nudge, 380 + slide + nudge, cy,
+                          items[i], sel, true);
+        }
+    }
+
+    // --- title banner: slab type on black, garlands running to the edges ---
+    {
+        if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
+        const char* T = "AUTOCRANK";
+        int tW = th_text_w(game.fontLarge, T);
+        int bw = tW + 52, bh = 34, bx = (SCREEN_W - bw) / 2;
+        int by = 16;
+        if (entry < 60) by = ease_out(-50, 16, entry, 16);
+
+        th_pennant_garland(-8, bx + 6, by + bh / 2, 8);
+        th_pennant_garland(bx + bw - 6, SCREEN_W + 8, by + bh / 2, 8);
+
+        th_fill(bx + 4, by + 5, bw, bh, TH_PAT_HATCH);             // shadow
+        pd->graphics->fillTriangle(bx, by + bh - 12, bx, by + bh,  // ribbon tails
+                                   bx - 14, by + bh + 5, kColorBlack);
+        pd->graphics->fillTriangle(bx + bw, by + bh - 12, bx + bw, by + bh,
+                                   bx + bw + 14, by + bh + 5, kColorBlack);
+        GFX_FILL(bx, by, bw, bh, kColorBlack);                     // banner
+        GFX_RECT(bx + 3, by + 3, bw - 6, bh - 6, kColorWhite);
+        th_text(game.fontLarge, T, (SCREEN_W - tW) / 2, by + 7, true);
+        th_chip(SCREEN_W / 2, by + bh + 9, "COMBAT DES REINES", true);
+    }
 
     // --- lifetime stats + control hint along the bottom ---
     char buf[64];
@@ -368,15 +206,69 @@ void ui_title_render(void) {
              (unsigned long)game.totalRuns,
              (unsigned long)game.totalWins,
              (unsigned long)game.bestStreak);
-    draw_text_halo(buf, game.fontSmall, 8, 224);
-    const char* hint = "up/down + A";
-    int hw = pd->graphics->getTextWidth(game.fontSmall, hint, strlen(hint),
-                                        kASCIIEncoding, 0);
-    draw_text_halo(hint, game.fontSmall, SCREEN_W - hw - 8, 224);
+    th_text_halo(game.fontSmall, buf, 8, 224);
+    th_button_glyph(330, 231, 'A', false);
+    th_text_halo(game.fontSmall, "choose", 340, 224);
 }
 
 // ---------------------------------------------------------------------------
-// Game over
+// Roster gallery — the eighteen, one tier per row.
+// ---------------------------------------------------------------------------
+static void draw_roster_badge(int cx, int cy, bool earned) {
+    GFX_ELLIPSE(cx - 4, cy - 4, 9, 9, kColorWhite);
+    pd->graphics->drawEllipse(cx - 4, cy - 4, 9, 9, 1, 0, 360, kColorBlack);
+    if (earned) {
+        pd->graphics->fillTriangle(cx, cy - 3, cx + 3, cy,
+                                   cx, cy + 3, kColorBlack);
+        pd->graphics->fillTriangle(cx, cy - 3, cx, cy + 3,
+                                   cx - 3, cy, kColorBlack);
+    } else {
+        GFX_ELLIPSE(cx - 1, cy - 1, 3, 3, kColorBlack);
+    }
+}
+
+void ui_gallery_render(void) {
+    GFX_FILL(0, 0, SCREEN_W, SCREEN_H, kColorWhite);
+
+    // header band with a white pinline
+    GFX_FILL(0, 0, SCREEN_W, 22, kColorBlack);
+    GFX_LINE(0, 21, SCREEN_W, 21, 1, kColorWhite);
+    th_text_center(game.fontBold, "THE ROSTER", SCREEN_W / 2, 3, true);
+    th_edelweiss(SCREEN_W / 2 - 78, 11, 3);
+    th_edelweiss(SCREEN_W / 2 + 78, 11, 3);
+
+    // 6 columns x 3 rows — one tier per row, tier tab on the left margin.
+    for (int row = 0; row < 3; row++) {
+        int y = 28 + row * 64;
+        char tier[4];
+        snprintf(tier, sizeof(tier), "T%d", row + 1);
+        GFX_FILL(0, y + 10, 20, 20, kColorBlack);
+        pd->graphics->fillTriangle(20, y + 10, 26, y + 20, 20, y + 30,
+                                   kColorBlack);
+        th_text(game.fontSmall, tier, 3, y + 12, true);
+    }
+    for (int i = 0; i < PET_COUNT; i++) {
+        int col = i % 6, row = i / 6;
+        int cx = 30 + col * 61;
+        int cy = 28 + row * 64;
+        th_fill(cx + 2, cy + 2, 56, 48, TH_PAT_HATCH);
+        GFX_FILL(cx, cy, 56, 48, kColorWhite);
+        GFX_RECT(cx, cy, 56, 48, kColorBlack);
+        draw_creature((uint8_t)i, cx + 12, cy + 8);
+        const char* nm = pet_name((uint8_t)i);
+        int w = th_text_w(game.fontSmall, nm);
+        th_text(game.fontSmall, nm, cx + (56 - w) / 2, cy + 49, false);
+
+        if (game.petWinsAtMax[i] >= 1)
+            draw_roster_badge(cx + 48, cy + 7, true);
+        else if (game.petMaxLevel[i] >= MAX_PET_LEVEL)
+            draw_roster_badge(cx + 48, cy + 7, false);
+    }
+    th_hint_bar(NULL, "back", "badges: reach L3, then win with it");
+}
+
+// ---------------------------------------------------------------------------
+// Game over — snowfall, a lone cow, a carved memorial.
 // ---------------------------------------------------------------------------
 void ui_gameover_update(void) {
     PDButtons cur, prs, rel;
@@ -384,94 +276,68 @@ void ui_gameover_update(void) {
     game.resultTimer++;
     if (game.resultTimer > 30 && (prs & kButtonA)) {
         game.inRun = false;
+        th_wipe_start();
         game.state = STATE_TITLE;
         save_write();
     }
 }
 
 void ui_gameover_render(void) {
-    render_alpine_bg(154);
+    th_backdrop(150, TH_BG_CLOUDS);                 // overcast: no sun
+    th_fill(0, 0, SCREEN_W, SCREEN_H, TH_PAT_SCRIM);  // dusk falls
     int elapsed = (int)game.resultTimer;
 
-    // Vertical curtain wipe: a stippled black mat falls from the top during
-    // frames 0..15 and rests as a permanent backdrop scrim for the title bar.
+    // Curtain band drops from the top over frames 0..15, then stays.
     int wipeH = 44;
     int wipeY = (elapsed < 15) ? -wipeH + (wipeH + 4) * elapsed / 15 : 0;
     GFX_FILL(0, wipeY, SCREEN_W, wipeH, kColorBlack);
-    // Soft stippled trailing edge so the wipe doesn't look like a hard cut.
-    if (elapsed < 18) {
-        int trailY = wipeY + wipeH;
-        for (int y = 0; y < 6; y++) {
-            int yy = trailY + y;
-            if (yy < 0 || yy >= SCREEN_H) continue;
-            for (int x = (y & 1); x < SCREEN_W; x += 2)
-                GFX_FILL(x, yy, 1, 1, kColorBlack);
-        }
-    }
+    GFX_LINE(0, wipeY + wipeH, SCREEN_W, wipeY + wipeH, 1, kColorWhite);
 
-    // "GAME OVER" title — stamps in over frames 0..20 with overshoot.
+    // "GAME OVER" stamps in with overshoot.
     if (elapsed >= 2) {
         float p = (elapsed < 22) ? ((float)(elapsed - 2) / 20.0f) : 1.0f;
-        float scale = easef_out_back(p, 1.5f);
-        draw_scaled_text("GAME OVER", game.fontLarge,
-                         SCREEN_W / 2, 22, scale, true /* white */);
+        th_text_scaled(game.fontLarge, "GAME OVER",
+                       SCREEN_W / 2, 22, th_ease_back(p, 1.5f), true);
     }
 
-    // Lone cow drops in from above starting at frame 15.
+    // The lone Highland drops in from above at frame 15.
     if (elapsed >= 15) {
-        int targetY = 86;
-        int y = ease_out(-50, targetY, elapsed - 15, 18);
-        draw_creature_scaled(16, SCREEN_W / 2 - 32, y, 2);
+        int y = ease_out(-50, 78, elapsed - 15, 18);
+        draw_creature_scaled(13, SCREEN_W / 2 - 32, y, 2);
     }
 
-    // Dashed pasture line — fades in via dither density frames 25..40.
-    int pastureFade = elapsed - 25;
-    if (pastureFade > 0) {
-        int density = (pastureFade > 15) ? 6 : (6 + (15 - pastureFade));
-        for (int x = 30; x < SCREEN_W - 30; x += density)
-            GFX_FILL(x, 152, 3, 2, kColorBlack);
-    }
-
-    // Team-name epitaph card — slides up from below starting at frame 35.
+    // Memorial plank slides up from below at frame 35 — name, epitaph,
+    // and the summits they did climb, all carved on one board.
     if (elapsed >= 35) {
-        const int cardW = 220, cardH = 38;
-        int targetY = 162;
-        int startY  = SCREEN_H + 4;
-        int y = ease_out(startY, targetY, elapsed - 35, 20);
+        const int cardW = 260, cardH = 70;
+        int y = ease_out(SCREEN_H + 4, 150, elapsed - 35, 20);
         int x = SCREEN_W / 2 - cardW / 2;
-        draw_banner_card(x, y, cardW, cardH);
-        const char* tag = "R.I.P.";
-        if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-        int tw = pd->graphics->getTextWidth(game.fontSmall, tag, strlen(tag),
-                                            kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillBlack);
-        pd->graphics->drawText(tag, strlen(tag), kASCIIEncoding,
-                               x + cardW / 2 - tw / 2, y + 3);
-        pd->graphics->setDrawMode(kDrawModeCopy);
+        th_panel(x, y, cardW, cardH);
+        th_chip(SCREEN_W / 2, y, "R.I.P.", true);
         char nameBuf[40];
         team_name_str(game.playerName.adj, game.playerName.noun,
                       nameBuf, sizeof(nameBuf));
-        if (game.fontBold) pd->graphics->setFont(game.fontBold);
-        int nw = pd->graphics->getTextWidth(game.fontBold, nameBuf, strlen(nameBuf),
-                                            kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillBlack);
-        pd->graphics->drawText(nameBuf, strlen(nameBuf), kASCIIEncoding,
-                               x + cardW / 2 - nw / 2, y + 16);
-        pd->graphics->setDrawMode(kDrawModeCopy);
-    }
-
-    // Subtitle and prompt come last.
-    if (elapsed >= 55) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "made it to %d wins", game.wins);
-        draw_text_halo_centered(buf, game.fontSmall, 207);
+        th_text_center(game.fontBold, nameBuf, SCREEN_W / 2, y + 13, false);
+        th_edelweiss(x + 18, y + 24, 4);
+        th_edelweiss(x + cardW - 18, y + 24, 4);
+        if (elapsed >= 55) {
+            char buf[48];
+            snprintf(buf, sizeof(buf), "fell %d summit%s short",
+                     WINS_TO_VICTORY - (int)game.wins,
+                     (WINS_TO_VICTORY - (int)game.wins) == 1 ? "" : "s");
+            th_text_center(game.fontSmall, buf, SCREEN_W / 2, y + 31, false);
+            th_peak_meter(SCREEN_W / 2, y + 60, (int)game.wins,
+                          WINS_TO_VICTORY, 9, false);
+        }
     }
     if (elapsed >= 60 && ((game.frameCount / 15) & 1))
-        draw_text_halo_centered("PRESS A", game.fontBold, 224);
+        th_text_halo_center(game.fontBold, "PRESS A", SCREEN_W / 2, 226);
+
+    draw_snow(elapsed);
 }
 
 // ---------------------------------------------------------------------------
-// Victory
+// Victory — rosettes, garlands, confetti, and the queen herself.
 // ---------------------------------------------------------------------------
 void ui_victory_update(void) {
     PDButtons cur, prs, rel;
@@ -479,105 +345,97 @@ void ui_victory_update(void) {
     game.resultTimer++;
     if (game.resultTimer > 30 && (prs & kButtonA)) {
         game.inRun = false;
+        th_wipe_start();
         game.state = STATE_TITLE;
         save_write();
     }
 }
 
-// Deterministic sparkles around the victory cow — a handful of single pixels
-// that wink on/off independently. No state needed.
+// Deterministic winking sparkles around the champion.
 static void draw_sparkles(int cx, int cy, int rOuter, int t) {
     const int N = 12;
     for (int i = 0; i < N; i++) {
-        // angle around the cow + radial variance
         float a = (float)i * (2.0f * PI_F / (float)N);
         int r = rOuter - ((i * 13) % 18);
-        int x = cx + (int)(cosf(a) * r);
-        int y = cy + (int)(sinf(a) * (r * 6 / 10));
-        // wink: each sparkle on for ~8 frames every 24
+        int x = cx + (int)(cosf(a) * (float)r);
+        int y = cy + (int)(sinf(a) * (float)(r * 6 / 10));
         int phase = (i * 7) % 24;
         if (((t + phase) % 24) < 8)
-            GFX_FILL(x, y, 1, 1, kColorBlack);
+            GFX_FILL(x, y, 2, 2, kColorBlack);
     }
 }
 
 void ui_victory_render(void) {
-    render_alpine_bg(154);
+    th_backdrop(154, TH_BG_RICH);
     int elapsed = (int)game.resultTimer;
 
-    // ---- frame 0-10: diagonal banner wipe from top-left ----
-    // The wipe leaves a black title bar across the top of the screen.
+    // ---- frame 0-10: diagonal banner wipe leaves the black title band ----
     int wipeW = SCREEN_W + SCREEN_H;
     int wipeProgress = (elapsed < 10) ? (wipeW * elapsed / 10) : wipeW;
-    // Draw the title bar progressively from the wipe
     for (int y = 0; y < 44; y++) {
-        int xEnd = wipeProgress - y;     // diagonal: bigger y = shorter so far
+        int xEnd = wipeProgress - y;
         if (xEnd > SCREEN_W) xEnd = SCREEN_W;
         if (xEnd > 0) GFX_FILL(0, y, xEnd, 1, kColorBlack);
+    }
+    if (elapsed >= 10) {
+        GFX_LINE(0, 44, SCREEN_W, 44, 1, kColorWhite);
+        th_pennant_garland(-8, SCREEN_W + 8, 46, 7);
     }
 
     // ---- frame 5-20: CHAMPION! stamps in ----
     if (elapsed >= 5) {
         float p = (elapsed < 20) ? ((float)(elapsed - 5) / 15.0f) : 1.0f;
-        float scale = easef_out_back(p, 1.8f);
-        if (scale > 0.05f)
-            draw_scaled_text("CHAMPION!", game.fontLarge,
-                             SCREEN_W / 2, 22, scale, true /* white */);
+        th_text_scaled(game.fontLarge, "CHAMPION!",
+                       SCREEN_W / 2, 22, th_ease_back(p, 1.8f), true);
     }
 
-    // ---- frame 15-35: cow rises from below into position ----
+    // ---- frame 15-35: the queen rises from below into position ----
     int cs = 3, cowPx = 32 * cs, cowCx = SCREEN_W / 2;
-    int cyTarget = 54;
-    int cyStart  = SCREEN_H + 10;
-    int cyTop = (elapsed >= 15) ? ease_out(cyStart, cyTarget, elapsed - 15, 20)
-                                : cyStart;
-    draw_creature_scaled(16, cowCx - cowPx / 2, cyTop, cs);
+    int cyTarget = 58;
+    int cyTop = (elapsed >= 15)
+                ? ease_out(SCREEN_H + 10, cyTarget, elapsed - 15, 20)
+                : SCREEN_H + 10;
+    draw_creature_scaled(13, cowCx - cowPx / 2, cyTop, cs);
+
+    // ---- frame 22-34: prize rosettes stamp in on either side ----
+    if (elapsed >= 22) {
+        float p = (elapsed < 34) ? ((float)(elapsed - 22) / 12.0f) : 1.0f;
+        int rr = (int)(16.0f * th_ease_back(p, 1.6f));
+        if (rr > 2) {
+            th_rosette(104, 96, rr);
+            th_rosette(296, 96, rr);
+        }
+    }
 
     // ---- frame 25-45: edelweiss arch materialises one-by-one ----
     static const int arch[5] = { 6, 2, 0, 2, 6 };
     for (int i = 0; i < 5; i++) {
-        int appearAt = 25 + i * 3;
-        if (elapsed >= appearAt) {
-            draw_flower(cowCx - 44 + i * 22, cyTarget + 12 + arch[i], 4);
-        }
+        if (elapsed >= 25 + i * 3)
+            th_edelweiss(cowCx - 44 + i * 22, cyTarget + 12 + arch[i], 4);
     }
 
-    // ---- frame 35-55: team-name banner slides up from the bottom ----
+    // ---- frame 35-55: champions plate slides up ----
     if (elapsed >= 35) {
-        const int cardW = 240, cardH = 40;
-        int targetY = 158;
-        int startY  = SCREEN_H + 4;
-        int y = ease_out(startY, targetY, elapsed - 35, 20);
+        const int cardW = 250, cardH = 54;
+        int y = ease_out(SCREEN_H + 4, 158, elapsed - 35, 20);
         int x = SCREEN_W / 2 - cardW / 2;
-        draw_banner_card(x, y, cardW, cardH);
-        const char* tag = "CHAMPIONS";
-        if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-        int tw = pd->graphics->getTextWidth(game.fontSmall, tag, strlen(tag),
-                                            kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillBlack);
-        pd->graphics->drawText(tag, strlen(tag), kASCIIEncoding,
-                               x + cardW / 2 - tw / 2, y + 4);
-        pd->graphics->setDrawMode(kDrawModeCopy);
+        th_panel(x, y, cardW, cardH);
+        th_chip(SCREEN_W / 2, y, "CHAMPIONS", true);
         char nameBuf[40];
         team_name_str(game.playerName.adj, game.playerName.noun,
                       nameBuf, sizeof(nameBuf));
-        if (game.fontBold) pd->graphics->setFont(game.fontBold);
-        int nw = pd->graphics->getTextWidth(game.fontBold, nameBuf, strlen(nameBuf),
-                                            kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillBlack);
-        pd->graphics->drawText(nameBuf, strlen(nameBuf), kASCIIEncoding,
-                               x + cardW / 2 - nw / 2, y + 18);
-        pd->graphics->setDrawMode(kDrawModeCopy);
+        th_text_center(game.fontBold, nameBuf, SCREEN_W / 2, y + 13, false);
+        th_peak_meter(SCREEN_W / 2, y + 46, WINS_TO_VICTORY, WINS_TO_VICTORY,
+                      11, false);
     }
 
-    // ---- frame 60+: idle sparkles around the cow ----
-    if (elapsed >= 60) {
-        draw_sparkles(cowCx, cyTarget + cowPx / 2 - 4, 70, elapsed);
-    }
+    // ---- frame 50+: confetti + sparkles ----
+    if (elapsed >= 50) draw_confetti(elapsed);
+    if (elapsed >= 60) draw_sparkles(cowCx, cyTarget + cowPx / 2 - 4, 70, elapsed);
 
     // ---- frame 70+: PRESS A blink ----
     if (elapsed >= 70 && ((game.frameCount / 15) & 1))
-        draw_text_halo_centered("PRESS A", game.fontBold, 210);
+        th_text_halo_center(game.fontBold, "PRESS A", SCREEN_W / 2, 222);
 }
 
 // ---------------------------------------------------------------------------
@@ -593,96 +451,13 @@ void ui_pre_battle_update(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared animation helpers — used by pre-battle, result, gameover, victory.
-// ---------------------------------------------------------------------------
-
-// Quadratic ease-out: float 0..1 in, 0..1 out, fast at the start.
-static float easef_out(float p) {
-    if (p <= 0.0f) return 0.0f;
-    if (p >= 1.0f) return 1.0f;
-    return 1.0f - (1.0f - p) * (1.0f - p);
-}
-
-// Quadratic ease-out used on integer ranges.
-static int ease_out(int from, int to, int t, int dur) {
-    if (t <= 0) return from;
-    if (t >= dur) return to;
-    float p = easef_out((float)t / (float)dur);
-    return from + (int)((to - from) * p);
-}
-
-// Overshoot ease (a.k.a. "back" ease): rises past 1.0 then settles. Used for
-// stamp-in scale animations so the title hits like a stamp.
-static float easef_out_back(float p, float overshoot) {
-    if (p <= 0.0f) return 0.0f;
-    if (p >= 1.0f) return 1.0f;
-    float c1 = overshoot;
-    float c3 = c1 + 1.0f;
-    float q = p - 1.0f;
-    return 1.0f + c3 * q * q * q + c1 * q * q;
-}
-
-// Draw a "card" — drop shadow, white fill, double border. Same shape used by
-// the title menu, name picker, intro banners, etc.
-static void draw_banner_card(int x, int y, int w, int h) {
-    GFX_FILL(x + 3, y + 3, w, h, kColorBlack);          // drop shadow
-    GFX_FILL(x, y, w, h, kColorWhite);
-    GFX_RECT(x, y, w, h, kColorBlack);
-    GFX_RECT(x + 1, y + 1, w - 2, h - 2, kColorBlack);
-}
-
-// Inverted variant — solid black card, white text on it.
-static void draw_banner_card_inverted(int x, int y, int w, int h) {
-    GFX_FILL(x + 3, y + 3, w, h, (LCDColor)UI_SHADE);   // soft shadow
-    GFX_FILL(x, y, w, h, kColorBlack);
-    GFX_RECT(x, y, w, h, kColorBlack);
-}
-
-// Scaled bold text — draws `s` at scale (1.0 = native). Uses a temporary
-// bitmap for the source font glyphs so we can apply Playdate's bitmap scale.
-// For 1.0 falls through to drawText (cheap). For other scales we render to
-// a tight bitmap and scale-blit it.
-static void draw_scaled_text(const char* s, LCDFont* font, int cx, int cy,
-                             float scale, bool invertColor) {
-    if (font) pd->graphics->setFont(font);
-    int w = pd->graphics->getTextWidth(font, s, strlen(s), kASCIIEncoding, 0);
-    int h = pd->graphics->getFontHeight(font);
-    if (scale > 0.98f && scale < 1.02f) {
-        pd->graphics->setDrawMode(invertColor ? kDrawModeFillWhite
-                                              : kDrawModeFillBlack);
-        pd->graphics->drawText(s, strlen(s), kASCIIEncoding,
-                               cx - w / 2, cy - h / 2);
-        pd->graphics->setDrawMode(kDrawModeCopy);
-        return;
-    }
-    LCDBitmap* tmp = pd->graphics->newBitmap(w + 4, h + 4, kColorClear);
-    pd->graphics->pushContext(tmp);
-    pd->graphics->setDrawMode(invertColor ? kDrawModeFillWhite
-                                          : kDrawModeFillBlack);
-    pd->graphics->drawText(s, strlen(s), kASCIIEncoding, 2, 2);
-    pd->graphics->setDrawMode(kDrawModeCopy);
-    pd->graphics->popContext();
-    pd->graphics->drawRotatedBitmap(tmp, cx, cy, 0.0f, 0.5f, 0.5f,
-                                    scale, scale);
-    pd->graphics->freeBitmap(tmp);
-}
-
-// One-frame screen-flash. Pass true to invert the whole screen.
-static void draw_flash_overlay(bool on) {
-    if (!on) return;
-    pd->graphics->setDrawMode(kDrawModeInverted);
-    GFX_FILL(0, 0, SCREEN_W, SCREEN_H, kColorBlack);
-    pd->graphics->setDrawMode(kDrawModeCopy);
-}
-
-// ---------------------------------------------------------------------------
 // Pre-battle intro animation: overlay on top of the live battle line-up.
 //
-//   0–18  ACT 1  player card slides in from off-left, lands left of centre
-//  12–30  ACT 2  enemy card slides in from off-right, lands right of centre
-//  24–36  ACT 3  big VS stamps in centre with overshoot, 1-frame impact flash
-//  36–75  HOLD   both cards + VS sit steady (1.3 s reading time)
-//  75–90  EXIT   cards slide back off-screen; VS shrinks to its small dot
+//   0–18  ACT 1  player plate slides in from off-left
+//  12–30  ACT 2  challenger plate slides in from off-right
+//  24–36  ACT 3  the VS rosette stamps in centre, 1-frame impact flash
+//  36–75  HOLD   everything sits steady (reading time)
+//  75–90  EXIT   plates slide back off; the rosette shrinks away
 // ---------------------------------------------------------------------------
 static void draw_intro_animation(int elapsed) {
     char playerBuf[40], enemyBuf[40];
@@ -691,97 +466,63 @@ static void draw_intro_animation(int elapsed) {
     team_name_str(game.enemyName.adj, game.enemyName.noun,
                   enemyBuf, sizeof(enemyBuf));
 
-    // No full-screen scrim — the battle line-up shows through behind us.
-    // A short black title bar across the top corners would clash with the
-    // existing topbar, so the intro cards live just under it.
-
-    const int bannerW = 178, bannerH = 44;
+    const int bannerW = 178, bannerH = 46;
     const int leftTargetX  = 8;
     const int rightTargetX = SCREEN_W - bannerW - 8;
-    const int bannerY = 56;
+    const int bannerY = 58;
 
-    // ---- ACT 1: player card from off-left ----
+    // ---- ACT 1: player plate from off-left ----
     {
-        int startX = -bannerW - 6;
+        int startX = -bannerW - 8;
         int x = ease_out(startX, leftTargetX, elapsed, 18);
-        // Exit slide: starts at frame 75, completes by 90
-        if (elapsed >= 75) {
-            x = ease_out(leftTargetX, startX, elapsed - 75, 15);
-        }
-        draw_banner_card(x, bannerY, bannerW, bannerH);
-        const char* tag = "YOUR HERD";
-        if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-        int tw = pd->graphics->getTextWidth(game.fontSmall, tag, strlen(tag),
-                                            kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillBlack);
-        pd->graphics->drawText(tag, strlen(tag), kASCIIEncoding,
-                               x + bannerW / 2 - tw / 2, bannerY + 4);
-        pd->graphics->setDrawMode(kDrawModeCopy);
-        if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
-        int nw = pd->graphics->getTextWidth(game.fontLarge, playerBuf, strlen(playerBuf),
-                                            kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillBlack);
-        pd->graphics->drawText(playerBuf, strlen(playerBuf), kASCIIEncoding,
-                               x + bannerW / 2 - nw / 2, bannerY + 18);
-        pd->graphics->setDrawMode(kDrawModeCopy);
+        if (elapsed >= 75) x = ease_out(leftTargetX, startX, elapsed - 75, 15);
+        th_panel(x, bannerY, bannerW, bannerH);
+        th_text_center(game.fontSmall, "YOUR HERD",
+                       x + bannerW / 2, bannerY + 6, false);
+        th_text_center(game.fontLarge, playerBuf,
+                       x + bannerW / 2, bannerY + 20, false);
     }
 
-    // ---- ACT 2: enemy card from off-right ----
+    // ---- ACT 2: challenger plate from off-right ----
     if (elapsed >= 12) {
-        int startX = SCREEN_W + 6;
+        int startX = SCREEN_W + 8;
         int x = ease_out(startX, rightTargetX, elapsed - 12, 18);
-        if (elapsed >= 75) {
-            x = ease_out(rightTargetX, startX, elapsed - 75, 15);
-        }
-        draw_banner_card_inverted(x, bannerY, bannerW, bannerH);
-        const char* tag = "THE CHALLENGER";
-        if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-        int tw = pd->graphics->getTextWidth(game.fontSmall, tag, strlen(tag),
-                                            kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillWhite);
-        pd->graphics->drawText(tag, strlen(tag), kASCIIEncoding,
-                               x + bannerW / 2 - tw / 2, bannerY + 4);
-        pd->graphics->setDrawMode(kDrawModeCopy);
-        if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
-        int nw = pd->graphics->getTextWidth(game.fontLarge, enemyBuf, strlen(enemyBuf),
-                                            kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillWhite);
-        pd->graphics->drawText(enemyBuf, strlen(enemyBuf), kASCIIEncoding,
-                               x + bannerW / 2 - nw / 2, bannerY + 18);
-        pd->graphics->setDrawMode(kDrawModeCopy);
+        if (elapsed >= 75) x = ease_out(rightTargetX, startX, elapsed - 75, 15);
+        th_panel_dark(x, bannerY, bannerW, bannerH);
+        th_text_center(game.fontSmall, "THE CHALLENGER",
+                       x + bannerW / 2, bannerY + 6, true);
+        th_text_center(game.fontLarge, enemyBuf,
+                       x + bannerW / 2, bannerY + 20, true);
     }
 
-    // ---- ACT 3: VS stamp centred between the two cards ----
+    // ---- ACT 3: VS rosette stamped between the plates ----
     if (elapsed >= 24) {
         int t = elapsed - 24;
         float p = (t > 12) ? 1.0f : ((float)t / 12.0f);
-        float scale = easef_out_back(p, 1.7f);
-        // Exit: shrink down during 75..90
+        float scale = th_ease_back(p, 1.7f);
         if (elapsed >= 75) {
             float q = (float)(elapsed - 75) / 15.0f;
             if (q > 1.0f) q = 1.0f;
             scale = 1.0f - q;
         }
-        int rr = 22;
         int cx = SCREEN_W / 2;
         int cy = bannerY + bannerH / 2;
-        if (scale > 0.05f) {
-            int rs = (int)(rr * scale);
-            GFX_ELLIPSE(cx - rs, cy - rs, rs * 2, rs * 2, kColorBlack);
-            GFX_ELLIPSE(cx - rs + 2, cy - rs + 2, rs * 2 - 4, rs * 2 - 4, kColorWhite);
-            pd->graphics->drawEllipse(cx - rs, cy - rs, rs * 2, rs * 2, 2, 0, 360,
-                                      kColorBlack);
-            draw_scaled_text("VS", game.fontLarge, cx, cy, scale, false);
+        int rr = (int)(24.0f * scale);
+        if (rr > 2) {
+            th_rosette(cx, cy, rr);
+            // clean white face for the lettering (the rosette core is black)
+            int fr = (rr * 7) / 8 - 2;
+            if (fr > 2) GFX_ELLIPSE(cx - fr, cy - fr, fr * 2, fr * 2,
+                                    kColorWhite);
+            th_text_scaled(game.fontLarge, "VS", cx, cy, scale * 0.8f, false);
         }
         if (t == 12) draw_flash_overlay(true);
     }
 }
 
 void ui_pre_battle_render(void) {
-    // Draw the live battle scene behind everything — the intro is purely
-    // an overlay.
+    // The live battle scene shows through — the intro is purely an overlay.
     render_battle_screen();
-
     int elapsed = 90 - (int)game.preBattleTimer;
     draw_intro_animation(elapsed);
 }
@@ -798,70 +539,7 @@ void ui_result_update(void) {
     }
 }
 
-// 16 × 14 white heart, anchored at the centre (cx, cy). Two top lobes and a
-// chevron-style point at the bottom; filled or outline. Reads cleanly on the
-// black banner background.
-static void draw_heart(int cx, int cy, bool filled) {
-    if (filled) {
-        // Top lobes: two filled ellipses slightly overlapping.
-        GFX_ELLIPSE(cx - 7, cy - 5, 8, 7, kColorWhite);
-        GFX_ELLIPSE(cx - 1, cy - 5, 8, 7, kColorWhite);
-        // Body block joins the lobes so the silhouette reads as one shape.
-        GFX_FILL(cx - 6, cy - 2, 13, 4, kColorWhite);
-        // Bottom V — a filled triangle ending in a single-pixel point.
-        pd->graphics->fillTriangle(cx - 6, cy + 2, cx + 6, cy + 2,
-                                   cx, cy + 8, kColorWhite);
-    } else {
-        // Outline lobes
-        pd->graphics->drawEllipse(cx - 7, cy - 5, 8, 7, 1, 0, 360, kColorWhite);
-        pd->graphics->drawEllipse(cx - 1, cy - 5, 8, 7, 1, 0, 360, kColorWhite);
-        // Connector arcs along the bottom of the lobes are hidden by drawing
-        // the two slanting V edges from the lobe tips down to a single point.
-        GFX_LINE(cx - 6, cy + 1, cx, cy + 8, 1, kColorWhite);
-        GFX_LINE(cx + 6, cy + 1, cx, cy + 8, 1, kColorWhite);
-    }
-}
-
-// Horizontal progress bar across the result banner — clearer than dots for
-// "X of 10 wins". Reads left-to-right like a fuel gauge.
-static void draw_win_progress(int cx, int cy, int wins, int total) {
-    int segW = 22, segH = 10, gap = 3;
-    int totalW = total * segW + (total - 1) * gap;
-    int x0 = cx - totalW / 2;
-    for (int i = 0; i < total; i++) {
-        int sx = x0 + i * (segW + gap);
-        if (i < wins) {
-            GFX_FILL(sx, cy - segH / 2, segW, segH, kColorWhite);
-        } else {
-            pd->graphics->drawRect(sx, cy - segH / 2, segW, segH, kColorWhite);
-            // single pixel hole in the middle so it reads as "empty cup"
-            // rather than just an empty rect.
-            GFX_FILL(sx + segW / 2 - 1, cy - 1, 2, 2, kColorWhite);
-        }
-    }
-}
-
-// Draw confetti dots falling from the top of the screen. Deterministic by
-// dot index + frame so it loops cleanly without state.
-static void draw_confetti(int elapsed) {
-    const int N = 36;
-    for (int i = 0; i < N; i++) {
-        // each dot has a fixed x and a phase offset
-        int x = ((i * 1657) % SCREEN_W);
-        int speed = 2 + ((i * 97) % 4);            // 2..5 px/frame
-        int phase = (i * 213) % 90;                // staggered start
-        int t = (elapsed + phase) % 120;
-        int y = (t * speed) % (SCREEN_H + 8) - 4;
-        // alternate dot vs short streak
-        if ((i & 1) == 0)
-            GFX_FILL(x, y, 2, 2, kColorBlack);
-        else
-            GFX_FILL(x, y, 1, 3, kColorBlack);
-    }
-}
-
-// Spray 4 small black diamonds outward from (cx, cy) over `t` frames.
-// Used as the "heart shatter" on loss.
+// Spray 4 small diamonds outward from (cx, cy) — the heart-shatter on a loss.
 static void draw_shatter(int cx, int cy, int t) {
     if (t < 0 || t > 14) return;
     int r = (t * 14) / 14 + 4;
@@ -869,123 +547,103 @@ static void draw_shatter(int cx, int cy, int t) {
     for (int i = 0; i < 4; i++) {
         int x = cx + dirs[i][0] * r;
         int y = cy + dirs[i][1] * r;
-        pd->graphics->fillTriangle(x, y - 3, x + 3, y, x, y + 3, kColorBlack);
-        pd->graphics->fillTriangle(x, y - 3, x, y + 3, x - 3, y, kColorBlack);
+        pd->graphics->fillTriangle(x, y - 3, x + 3, y, x, y + 3, kColorWhite);
+        pd->graphics->fillTriangle(x, y - 3, x, y + 3, x - 3, y, kColorWhite);
     }
 }
 
 void ui_result_render(void) {
-    render_alpine_bg(90);
+    th_backdrop(90, TH_BG_CLOUDS);
     render_topbar();
 
     int elapsed = (int)game.resultTimer;
-    int by = 38, bh = 168;
+    int by = 38, bh = 170;
 
-    // Outcome-specific FX behind the banner.
+    // Outcome-specific weather behind the banner.
     if (game.battleResult == 0) {
-        // WIN: confetti rains for the whole screen lifetime.
         draw_confetti(elapsed);
     } else if (game.battleResult == 1) {
-        // LOSS: a 50% stipple darken-pass over the alpine bg.
-        pd->graphics->setDrawMode(kDrawModeCopy);
-        for (int y = 18; y < SCREEN_H; y += 2)        // 18 = TOPBAR_H
-            for (int x = (y & 2) ? 0 : 1; x < SCREEN_W; x += 2)
-                GFX_FILL(x, y, 1, 1, kColorBlack);
+        th_fill(0, TOPBAR_H, SCREEN_W, SCREEN_H - TOPBAR_H, TH_PAT_SCRIM);
     }
 
-    // Banner with double border. Slides down 10 px during stamp-in for a
-    // settling effect.
+    // Banner: black band, white pinlines, settles down 10px on entry.
     int yoff = (elapsed < 8) ? (-10 + (elapsed * 10) / 8) : 0;
     GFX_FILL(0, by + yoff, SCREEN_W, bh, kColorBlack);
     GFX_LINE(0, by + yoff,      SCREEN_W, by + yoff,      2, kColorWhite);
     GFX_LINE(0, by + bh + yoff, SCREEN_W, by + bh + yoff, 2, kColorWhite);
+    // centre diamonds on the pinlines — a carved detail
+    pd->graphics->fillTriangle(SCREEN_W / 2 - 5, by + yoff,
+                               SCREEN_W / 2 + 5, by + yoff,
+                               SCREEN_W / 2, by + yoff + 6, kColorWhite);
+    pd->graphics->fillTriangle(SCREEN_W / 2 - 5, by + bh + yoff,
+                               SCREEN_W / 2 + 5, by + bh + yoff,
+                               SCREEN_W / 2, by + bh + yoff - 6, kColorWhite);
 
-    // Title — punchy single word. Stamp-in over 15 frames with overshoot.
+    // Title — stamps in with overshoot; rosettes flank a VICTORY.
     const char* label = (game.battleResult == 0) ? "VICTORY"
                       : (game.battleResult == 1) ? "DEFEAT"
                                                  : "STALEMATE";
     float p = (elapsed < 15) ? ((float)elapsed / 15.0f) : 1.0f;
-    float scale = easef_out_back(p, 1.6f);
-    draw_scaled_text(label, game.fontLarge,
-                     SCREEN_W / 2, by + 28 + yoff, scale, true /* white */);
+    float scale = th_ease_back(p, 1.6f);
+    th_text_scaled(game.fontLarge, label,
+                   SCREEN_W / 2, by + 28 + yoff, scale, true);
+    if (game.battleResult == 0 && elapsed >= 8) {
+        float rp = (elapsed < 20) ? ((float)(elapsed - 8) / 12.0f) : 1.0f;
+        int rr = (int)(13.0f * th_ease_back(rp, 1.6f));
+        if (rr > 2) {
+            // white-on-black rosettes: draw a white disc backing first
+            GFX_ELLIPSE(60 - rr - 2, by + 28 - rr - 2 + yoff,
+                        rr * 2 + 4, rr * 2 + 4, kColorWhite);
+            GFX_ELLIPSE(SCREEN_W - 60 - rr - 2, by + 28 - rr - 2 + yoff,
+                        rr * 2 + 4, rr * 2 + 4, kColorWhite);
+            th_rosette(60, by + 28 + yoff, rr);
+            th_rosette(SCREEN_W - 60, by + 28 + yoff, rr);
+        }
+    }
 
     // One-frame impact flash on stamp landing.
     if (elapsed == 6) draw_flash_overlay(true);
 
-    // ---- WINS section: "WINS  N / 10" label + segmented progress bar ----
+    // ---- WINS: label + the ten summits, big ----
     if (elapsed >= 15) {
-        int wins = game.wins;   // already incremented in game_after_battle
+        int wins = game.wins;   // already tallied in game_apply_battle_result
         char winsBuf[24];
-        snprintf(winsBuf, sizeof(winsBuf), "WINS  %d / %d", wins,
+        snprintf(winsBuf, sizeof(winsBuf), "SUMMITS  %d / %d", wins,
                  WINS_TO_VICTORY);
-        if (game.fontBold) pd->graphics->setFont(game.fontBold);
-        int wtw = pd->graphics->getTextWidth(game.fontBold, winsBuf,
-                                             strlen(winsBuf),
-                                             kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillWhite);
-        pd->graphics->drawText(winsBuf, strlen(winsBuf), kASCIIEncoding,
-                               (SCREEN_W - wtw) / 2, by + 52);
-        pd->graphics->setDrawMode(kDrawModeCopy);
-        draw_win_progress(SCREEN_W / 2, by + 78, wins, WINS_TO_VICTORY);
-        // Pulse the just-earned segment on win.
+        th_text_center(game.fontBold, winsBuf, SCREEN_W / 2, by + 50, true);
+        th_peak_meter(SCREEN_W / 2, by + 92, wins, WINS_TO_VICTORY, 14, true);
+        // Pulse the freshly-climbed summit on a win.
         if (game.battleResult == 0 && wins > 0) {
             int pulseT = elapsed - 15;
             if (pulseT < 30 && (pulseT / 5) % 2 == 0) {
-                // overlay a 2px outline ring around the freshly-filled segment
-                int segW = 22, gap = 3;
-                int totalW = WINS_TO_VICTORY * segW + (WINS_TO_VICTORY - 1) * gap;
-                int x0 = SCREEN_W / 2 - totalW / 2;
-                int sx = x0 + (wins - 1) * (segW + gap);
-                int sy = by + 78 - 5;
-                pd->graphics->drawRect(sx - 2, sy - 2, segW + 4, 14, kColorWhite);
+                int x0 = SCREEN_W / 2 - (WINS_TO_VICTORY * 14) / 2;
+                int sx = x0 + (wins - 1) * 14;
+                pd->graphics->drawRect(sx - 2, by + 92 - 20, 18, 24,
+                                       kColorWhite);
             }
         }
     }
 
-    // ---- LIVES section: "LIVES" label + bigger pixel-art hearts ----
+    // ---- LIVES: label + hearts ----
     if (elapsed >= 15) {
-        if (game.fontBold) pd->graphics->setFont(game.fontBold);
-        const char* livesLbl = "LIVES";
-        int llw = pd->graphics->getTextWidth(game.fontBold, livesLbl,
-                                             strlen(livesLbl),
-                                             kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillWhite);
-        pd->graphics->drawText(livesLbl, strlen(livesLbl), kASCIIEncoding,
-                               (SCREEN_W - llw) / 2, by + 95);
-        pd->graphics->setDrawMode(kDrawModeCopy);
-
+        th_text_center(game.fontBold, "LIVES", SCREEN_W / 2, by + 104, true);
         int lives = game.lives;
         int hStep = 28;
         int hStartX = (SCREEN_W - (STARTING_LIVES - 1) * hStep) / 2;
-        int hY = by + 122;
-        for (int i = 0; i < STARTING_LIVES; i++) {
-            int hx = hStartX + i * hStep;
-            draw_heart(hx, hY, i < lives);
-        }
-        if (game.battleResult == 1 && lives < STARTING_LIVES) {
-            int shatterX = hStartX + lives * hStep;
-            draw_shatter(shatterX, hY, elapsed - 15);
-        }
+        int hY = by + 132;
+        for (int i = 0; i < STARTING_LIVES; i++)
+            th_heart(hStartX + i * hStep, hY, i < lives, true);
+        if (game.battleResult == 1 && lives < STARTING_LIVES)
+            draw_shatter(hStartX + lives * hStep, hY, elapsed - 15);
     }
 
     // PRESS A blink — bottom of the banner.
-    if (elapsed > 45 && ((game.frameCount / 15) & 1)) {
-        if (game.fontBold) pd->graphics->setFont(game.fontBold);
-        const char* pa = "PRESS A";
-        int pw = pd->graphics->getTextWidth(game.fontBold, pa, strlen(pa),
-                                            kASCIIEncoding, 0);
-        pd->graphics->setDrawMode(kDrawModeFillWhite);
-        pd->graphics->drawText(pa, strlen(pa), kASCIIEncoding,
-                               (SCREEN_W - pw) / 2, by + 144);
-        pd->graphics->setDrawMode(kDrawModeCopy);
-    }
-    pd->graphics->setDrawMode(kDrawModeCopy);
+    if (elapsed > 45 && ((game.frameCount / 15) & 1))
+        th_text_center(game.fontBold, "PRESS A", SCREEN_W / 2, by + 148, true);
 }
 
 // ---------------------------------------------------------------------------
-// Team-name picker — SAP-style 3-of-each, adj + noun.
-// Player presses A on PLAY → here. Pick a row with up/down, an option with
-// left/right, A to confirm and start the run, B to re-roll the 9 options.
+// Team-name picker — SAP-style 3-of-each, adj + noun, on a hanging sign.
 // ---------------------------------------------------------------------------
 static void name_reroll(void) {
     uint8_t adj_picked[3] = {0xFF, 0xFF, 0xFF};
@@ -1013,6 +671,7 @@ void ui_team_name_enter(void) {
     game.nameRow = 0;
     game.nameAdjConfirmed  = 0;
     game.nameNounConfirmed = 0;
+    th_wipe_start();
     game.state = STATE_TEAM_NAME;
 }
 
@@ -1079,6 +738,7 @@ void ui_team_name_update(void) {
             game.nameAdjConfirmed  = 0;
             game.nameNounConfirmed = 0;
         } else {
+            th_wipe_start();
             game.state = STATE_TITLE;
         }
     }
@@ -1087,72 +747,58 @@ void ui_team_name_update(void) {
 // Pill states for the name picker:
 //   hovered    — the cursor is on this pill; draws a 2px outer ring
 //   confirmed  — the player A'd this pill; fills black with white text
-//   neither    — default white card with drop shadow
-// Confirmed + hovered get both (filled card + ring).
+//   neither    — default white card with hatch shadow
 static void draw_pill(int cx, int cy, int w, int h, const char* label,
                       bool hovered, bool confirmed) {
     int x = cx - w / 2, y = cy - h / 2;
     if (confirmed) {
         GFX_FILL(x, y, w, h, kColorBlack);
     } else {
-        GFX_FILL(x + 2, y + 2, w, h, (LCDColor)UI_SHADE);
+        th_fill(x + 2, y + 2, w, h, TH_PAT_HATCH);
         GFX_FILL(x, y, w, h, kColorWhite);
         GFX_RECT(x, y, w, h, kColorBlack);
     }
     if (hovered) {
-        // 2px outer ring extending beyond the pill edge.
         GFX_RECT(x - 3, y - 3, w + 6, h + 6, kColorBlack);
         GFX_RECT(x - 2, y - 2, w + 4, h + 4, kColorBlack);
     }
     if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    int tw = pd->graphics->getTextWidth(game.fontBold, label, strlen(label),
-                                        kASCIIEncoding, 0);
-    pd->graphics->setDrawMode(confirmed ? kDrawModeFillWhite : kDrawModeFillBlack);
-    pd->graphics->drawText(label, strlen(label), kASCIIEncoding,
-                           cx - tw / 2 - 1, cy - 8);
-    pd->graphics->setDrawMode(kDrawModeCopy);
+    int tw = th_text_w(game.fontBold, label);
+    th_text(game.fontBold, label, cx - tw / 2 - 1, cy - 8, confirmed);
 }
 
 void ui_team_name_render(void) {
     LCDBitmap* bg = image_name_bg();
     if (!bg) bg = image_title_bg();
     if (bg) pd->graphics->drawBitmap(bg, 0, 0, kBitmapUnflipped);
-    else    GFX_CLEAR(kColorWhite);
+    else    th_backdrop(150, TH_BG_RICH);
 
-    GFX_FILL(0, 0, SCREEN_W, 30, kColorBlack);
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    const char* T = "NAME YOUR HERD";
-    int tw = pd->graphics->getTextWidth(game.fontBold, T, strlen(T),
-                                        kASCIIEncoding, 0);
-    pd->graphics->setDrawMode(kDrawModeFillWhite);
-    pd->graphics->drawText(T, strlen(T), kASCIIEncoding,
-                           (SCREEN_W - tw) / 2, 8);
-    pd->graphics->setDrawMode(kDrawModeCopy);
+    // Header band.
+    GFX_FILL(0, 0, SCREEN_W, 26, kColorBlack);
+    GFX_LINE(0, 25, SCREEN_W, 25, 1, kColorWhite);
+    th_text_center(game.fontBold, "NAME YOUR HERD", SCREEN_W / 2, 5, true);
+    th_cowbell_icon(SCREEN_W / 2 - 116, 13);
+    th_cowbell_icon(SCREEN_W / 2 + 116, 13);
 
+    // The sign-in-progress hangs from the band on two chains.
     char buf[40];
     team_name_str(game.nameAdjChoices[game.nameAdjPick],
                   game.nameNounChoices[game.nameNounPick],
                   buf, sizeof(buf));
-    int cw = 280, ch = 28, cx = SCREEN_W / 2, cy = 54;
-    GFX_FILL(cx - cw/2 + 3, cy - ch/2 + 3, cw, ch, (LCDColor)UI_SHADE);
-    GFX_FILL(cx - cw/2, cy - ch/2, cw, ch, kColorWhite);
-    GFX_RECT(cx - cw/2, cy - ch/2, cw, ch, kColorBlack);
-    if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
-    int bw = pd->graphics->getTextWidth(game.fontLarge, buf, strlen(buf),
-                                        kASCIIEncoding, 0);
-    pd->graphics->setDrawMode(kDrawModeFillBlack);
-    pd->graphics->drawText(buf, strlen(buf), kASCIIEncoding,
-                           cx - bw / 2, cy - 10);
-    pd->graphics->setDrawMode(kDrawModeCopy);
+    int cw = 290, ch = 34, cx = SCREEN_W / 2, cy = 56;
+    GFX_LINE(cx - 90, 26, cx - 96, cy - ch / 2, 2, kColorBlack);
+    GFX_LINE(cx + 90, 26, cx + 96, cy - ch / 2, 2, kColorBlack);
+    th_panel(cx - cw / 2, cy - ch / 2, cw, ch);
+    th_text_center(game.fontLarge, buf, cx, cy - 9, false);
 
-    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-    draw_text_halo("adjective", game.fontSmall, 12, 96);
-    draw_text_halo("noun",      game.fontSmall, 12, 146);
-
-    int rowAdjY = 110, rowNounY = 160;
-    int pillW = 100, pillH = 22, pillGap = 8;
+    int rowAdjY = 116, rowNounY = 166;
+    int pillW = 100, pillH = 22, pillGap = 10;
     int totalW = pillW * 3 + pillGap * 2;
     int leftX  = (SCREEN_W - totalW) / 2 + pillW / 2;
+
+    int labelX = leftX - pillW / 2;
+    th_text_halo(game.fontSmall, "ADJECTIVE", labelX, rowAdjY - pillH / 2 - 16);
+    th_text_halo(game.fontSmall, "NOUN",      labelX, rowNounY - pillH / 2 - 16);
     for (int i = 0; i < 3; i++) {
         int x = leftX + i * (pillW + pillGap);
 
@@ -1169,19 +815,20 @@ void ui_team_name_render(void) {
                   nounHovered, nounConfirmed);
     }
 
-    const char* hint = (!game.nameAdjConfirmed && !game.nameNounConfirmed)
-        ? "A select   B back"
-        : (game.nameAdjConfirmed && game.nameNounConfirmed)
-        ? "A start    B unselect"
-        : "A confirm  B unselect";
-    draw_text_halo(hint, game.fontSmall, 24, 222);
+    if (!game.nameAdjConfirmed && !game.nameNounConfirmed)
+        th_hint_bar("select", "back", NULL);
+    else if (game.nameAdjConfirmed && game.nameNounConfirmed)
+        th_hint_bar("start the run!", "unselect", NULL);
+    else
+        th_hint_bar("confirm", "unselect", NULL);
 }
 
 // ---------------------------------------------------------------------------
-// Hall of Fame — scrollable list of past 10-win runs.
+// Hall of Fame — scrollable ledger of past 10-win runs.
 // ---------------------------------------------------------------------------
 void ui_hof_enter(void) {
     game.hofCursor = 0;
+    th_wipe_start();
     game.state = STATE_HALL_OF_FAME;
 }
 
@@ -1195,7 +842,10 @@ void ui_hof_update(void) {
     PDButtons cur, prs, rel;
     pd->system->getButtonState(&cur, &prs, &rel);
     if (game.hofCount == 0) {
-        if (prs & (kButtonA | kButtonB)) game.state = STATE_TITLE;
+        if (prs & (kButtonA | kButtonB)) {
+            th_wipe_start();
+            game.state = STATE_TITLE;
+        }
         return;
     }
     if (prs & kButtonUp) {
@@ -1205,31 +855,36 @@ void ui_hof_update(void) {
         if (game.hofCursor + 1 < game.hofCount)
             game.hofCursor++;
     }
-    if (prs & kButtonB) game.state = STATE_TITLE;
+    if (prs & kButtonB) {
+        th_wipe_start();
+        game.state = STATE_TITLE;
+    }
 }
 
 void ui_hof_render(void) {
     GFX_CLEAR(kColorWhite);
 
-    GFX_FILL(0, 0, SCREEN_W, 30, kColorBlack);
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    const char* T = "HALL OF FAME";
-    int tw = pd->graphics->getTextWidth(game.fontBold, T, strlen(T),
-                                        kASCIIEncoding, 0);
-    pd->graphics->setDrawMode(kDrawModeFillWhite);
-    pd->graphics->drawText(T, strlen(T), kASCIIEncoding,
-                           (SCREEN_W - tw) / 2, 8);
-    pd->graphics->setDrawMode(kDrawModeCopy);
+    GFX_FILL(0, 0, SCREEN_W, 26, kColorBlack);
+    GFX_LINE(0, 25, SCREEN_W, 25, 1, kColorWhite);
+    th_text_center(game.fontBold, "HALL OF FAME", SCREEN_W / 2, 5, true);
+    // tiny white rosettes flanking the title
+    for (int s = -1; s <= 1; s += 2) {
+        int rx = SCREEN_W / 2 + s * 96;
+        GFX_ELLIPSE(rx - 7, 6, 14, 14, kColorWhite);
+        pd->graphics->drawEllipse(rx - 5, 8, 10, 10, 1, 0, 360, kColorBlack);
+        GFX_ELLIPSE(rx - 2, 11, 4, 4, kColorBlack);
+    }
 
     if (game.hofCount == 0) {
-        if (game.fontBold) pd->graphics->setFont(game.fontBold);
-        const char* m = "no winning runs yet";
-        int mw = pd->graphics->getTextWidth(game.fontBold, m, strlen(m),
-                                            kASCIIEncoding, 0);
-        pd->graphics->drawText(m, strlen(m), kASCIIEncoding,
-                               (SCREEN_W - mw) / 2, 110);
-        const char* hint = "B to go back";
-        draw_text_halo(hint, game.fontSmall, 24, 222);
+        th_panel(70, 78, 260, 84);
+        th_text_center(game.fontBold, "no champions yet",
+                       SCREEN_W / 2, 92, false);
+        th_text_center(game.fontSmall, "win 10 battles to carve",
+                       SCREEN_W / 2, 114, false);
+        th_text_center(game.fontSmall, "your herd's name here",
+                       SCREEN_W / 2, 128, false);
+        th_peak_meter(SCREEN_W / 2, 156, 0, WINS_TO_VICTORY, 11, false);
+        th_hint_bar(NULL, "back", NULL);
         return;
     }
 
@@ -1238,7 +893,7 @@ void ui_hof_render(void) {
     if (firstShown + 3 > game.hofCount) firstShown = game.hofCount - 3;
     if (firstShown < 0) firstShown = 0;
 
-    int rowH = 56, rowTop = 38;
+    int rowH = 56, rowTop = 32;
     for (int i = 0; i < 3 && firstShown + i < game.hofCount; i++) {
         int n = firstShown + i;
         int idx = hof_index_for_n(n);
@@ -1247,37 +902,35 @@ void ui_hof_render(void) {
         int y = rowTop + i * (rowH + 4);
         bool sel = (n == game.hofCursor);
 
+        th_fill(8, y + 2, SCREEN_W - 14, rowH, TH_PAT_HATCH);
         GFX_FILL(6, y, SCREEN_W - 12, rowH, kColorWhite);
         GFX_RECT(6, y, SCREEN_W - 12, rowH, kColorBlack);
-        if (sel) GFX_RECT(7, y + 1, SCREEN_W - 14, rowH - 2, kColorBlack);
+        if (sel) {
+            GFX_RECT(7, y + 1, SCREEN_W - 14, rowH - 2, kColorBlack);
+            pd->graphics->fillTriangle(0, y + rowH / 2 - 6, 0, y + rowH / 2 + 6,
+                                       6, y + rowH / 2, kColorBlack);
+        }
 
         for (int s = 0; s < TEAM_SIZE; s++) {
-            int sx = 14 + s * 36;
-            int sy = y + 8;
-            if (r->pets[s] < PET_COUNT) {
-                draw_creature_xform(r->pets[s], sx + 16, sy + 16, 1.0f,
+            int sx = 16 + s * 36;
+            if (r->pets[s] < PET_COUNT)
+                draw_creature_xform(r->pets[s], sx + 16, y + 26, 1.0f,
                                     0.0f, false);
-            }
         }
 
         char nameBuf[40];
         team_name_str(r->name.adj, r->name.noun, nameBuf, sizeof(nameBuf));
-        if (game.fontBold) pd->graphics->setFont(game.fontBold);
-        pd->graphics->setDrawMode(kDrawModeFillBlack);
-        pd->graphics->drawText(nameBuf, strlen(nameBuf), kASCIIEncoding,
-                               200, y + 8);
+        th_text(game.fontBold, nameBuf, 204, y + 8, false);
         char meta[24];
-        snprintf(meta, sizeof(meta), "turn %u", r->turn);
-        if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-        pd->graphics->drawText(meta, strlen(meta), kASCIIEncoding,
-                               200, y + 28);
-        pd->graphics->setDrawMode(kDrawModeCopy);
+        snprintf(meta, sizeof(meta), "DAY %u", r->turn);
+        th_chip(240, y + 40, meta, true);
+        th_rosette(SCREEN_W - 30, y + rowH / 2 - 4, 11);
     }
 
     char nav[24];
-    snprintf(nav, sizeof(nav), "%u / %u   B back",
+    snprintf(nav, sizeof(nav), "%u / %u",
              (unsigned)(game.hofCursor + 1), (unsigned)game.hofCount);
-    draw_text_halo(nav, game.fontSmall, 8, 222);
+    th_hint_bar(NULL, "back", nav);
 }
 
 // ---------------------------------------------------------------------------
@@ -1303,11 +956,15 @@ void ui_help_update(void) {
         game.settings |= SETTING_HELP_SEEN;
         save_write();
         if (g_helpThenPlay) { g_helpThenPlay = false; ui_team_name_enter(); }
-        else                  game.state = STATE_TITLE;
+        else {
+            th_wipe_start();
+            game.state = STATE_TITLE;
+        }
     } else if (prs & kButtonB) {
         game.settings |= SETTING_HELP_SEEN;
         save_write();
         g_helpThenPlay = false;
+        th_wipe_start();
         game.state = STATE_TITLE;
     }
 }
@@ -1315,34 +972,25 @@ void ui_help_update(void) {
 void ui_help_render(void) {
     LCDBitmap* bg = image_title_bg();
     if (bg) pd->graphics->drawBitmap(bg, 0, 0, kBitmapUnflipped);
-    else    render_alpine_bg(150);
+    else    th_backdrop(150, TH_BG_CLOUDS);
 
-    int px = 18, py = 16, pw = SCREEN_W - 36, ph = SCREEN_H - 32;
-    draw_banner_card(px, py, pw, ph);            // white card, shadow + border
+    int px = 12, py = 12, pw = SCREEN_W - 24, ph = SCREEN_H - 34;
+    th_panel(px, py, pw, ph);
 
-    // Title strip
-    GFX_FILL(px, py, pw, 24, kColorBlack);
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    pd->graphics->setDrawMode(kDrawModeFillWhite);
-    const char* T = "HOW TO PLAY";
-    int tw = pd->graphics->getTextWidth(game.fontBold, T, strlen(T), kASCIIEncoding, 0);
-    pd->graphics->drawText(T, strlen(T), kASCIIEncoding, px + (pw - tw) / 2, py + 4);
+    // Title strip inside the panel.
+    GFX_FILL(px + 4, py + 4, pw - 8, 22, kColorBlack);
+    th_text_center(game.fontBold, "HOW TO PLAY", SCREEN_W / 2, py + 7, true);
 
-    // Lines
-    if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
-    pd->graphics->setDrawMode(kDrawModeFillBlack);
-    int ly = py + 34;
+    // Lines, each with a tiny edelweiss-dot bullet.
+    int ly = py + 33;
     for (int i = 0; i < HELP_LINE_COUNT; i++) {
-        pd->graphics->drawText(HELP_LINES[i], strlen(HELP_LINES[i]),
-                               kASCIIEncoding, px + 12, ly);
+        GFX_ELLIPSE(px + 12, ly + 5, 4, 4, kColorBlack);
+        pd->graphics->drawEllipse(px + 10, ly + 3, 8, 8, 1, 0, 360,
+                                  kColorBlack);
+        th_text(game.fontSmall, HELP_LINES[i], px + 24, ly, false);
         ly += 17;
     }
 
-    // Footer prompt
-    const char* f = g_helpThenPlay ? "A  let's go!" : "A / B  back";
-    if (game.fontBold) pd->graphics->setFont(game.fontBold);
-    int fw = pd->graphics->getTextWidth(game.fontBold, f, strlen(f), kASCIIEncoding, 0);
-    pd->graphics->drawText(f, strlen(f), kASCIIEncoding,
-                           px + (pw - fw) / 2, py + ph - 24);
-    pd->graphics->setDrawMode(kDrawModeCopy);
+    if (g_helpThenPlay) th_hint_bar("let's go!", NULL, NULL);
+    else                th_hint_bar("back", NULL, NULL);
 }

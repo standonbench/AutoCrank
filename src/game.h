@@ -31,6 +31,7 @@ extern PlaydateAPI* pd;
 // ---------------------------------------------------------------------------
 #define SCREEN_W 400
 #define SCREEN_H 240
+#define TOPBAR_H 18
 
 // ---------------------------------------------------------------------------
 // Game balance / SAP-derived numbers
@@ -349,7 +350,20 @@ void game_init(void);
 int  update(void* userdata);
 void game_start_run(void);
 void game_advance_to_battle(void);
-void game_after_battle(void);
+void game_apply_battle_result(void);   // tally win/life when the result opens
+void game_after_battle(void);          // dismiss result -> next state
+
+// Shop combine telegraph: what pressing A on a given shop pet would do.
+// dstSlot < 0 means the team is full with no combine target (A is inert).
+typedef struct {
+    int8_t  dstSlot;      // destination team slot, or -1 if none
+    bool    isCombine;    // true = stacks onto an existing copy; false = new pet
+    bool    levelsUp;     // a combine that crosses into a new level
+    uint8_t resultLevel;  // level after the action (1 for a fresh buy)
+    uint8_t xpAfter;      // combine XP after the action
+    uint8_t xpNeeded;     // XP needed for the next level
+} CombinePreview;
+CombinePreview shop_combine_preview(uint8_t petId);
 
 // images.c
 void images_init(void);
@@ -360,7 +374,6 @@ LCDBitmap* image_name_bg(void);
 
 // render.c
 void render_topbar(void);
-void render_alpine_bg(int horizonY);
 void render_shop_screen(void);
 void render_battle_screen(void);
 void render_battle_reset_positions(void);
