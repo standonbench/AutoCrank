@@ -854,12 +854,16 @@ void render_shop_screen(void)
         gw += (tw - gw) * 0.45f;
         bool onActions = cc >= MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE;
         if (game.cursorShown && !onActions) {
-            // flat ground-perspective ring around the feet — tall enough to
-            // read, low enough that it never cuts across the sprite's body
-            int pulse = (int)(sinf((float)game.frameCount * 0.22f) * 2.0f);
-            int rw = (int)gw + pulse * 2;
-            pd->graphics->drawEllipse((int)gx - rw / 2, (int)gy - 8 - pulse / 2,
-                                      rw, 13 + pulse, 2, 0, 360, kColorBlack);
+            // Bobbing pointer above the slot — hovers clear of the sprite,
+            // level pips and stat badges instead of ringing through them.
+            // gw doubles as a height proxy (pets are taller than foods).
+            int bob = (int)(sinf((float)game.frameCount * 0.22f) * 3.0f);
+            int cxp = (int)gx;
+            int tip = (int)gy - (int)gw - 14 + bob;
+            pd->graphics->fillTriangle(cxp - 9, tip - 14, cxp + 9, tip - 14,
+                                       cxp, tip + 2, kColorWhite);
+            pd->graphics->fillTriangle(cxp - 7, tip - 12, cxp + 7, tip - 12,
+                                       cxp, tip, kColorBlack);
         }
     }
 
@@ -1017,7 +1021,7 @@ static BattleEvent* battle_cur_event(float* tOut) {
     return e;
 }
 
-#define BATTLE_FEET   162
+#define BATTLE_FEET   178
 #define BATTLE_CX     (SCREEN_W / 2)
 
 // Depth-staggered rest layout: the queue recedes up the pasture and shrinks
@@ -1025,7 +1029,7 @@ static BattleEvent* battle_cur_event(float* tOut) {
 // snipe at the back rank lands on a pet you can actually see. Rank 0 is the
 // frontline; it keeps the clear centre gap so the clash lunge reads.
 static const int   RANK_XOFF[TEAM_SIZE]  = { 46, 92, 130, 158, 180 };
-static const int   RANK_FEET[TEAM_SIZE]  = { 162, 159, 153, 147, 142 };
+static const int   RANK_FEET[TEAM_SIZE]  = { 178, 175, 169, 163, 158 };
 static const float RANK_SCALE[TEAM_SIZE] = { 1.40f, 1.28f, 1.15f, 1.03f,
                                              0.92f };
 

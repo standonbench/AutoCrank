@@ -141,12 +141,6 @@ void ui_title_render(void) {
         th_pine(110, 232, 30);
     }
 
-    // --- grazing herd (haloed for legibility over either backdrop) ---
-    const float S = 1.4f;
-    draw_creature_haloed(13,  60, 175, S, false);   // Highland, left
-    draw_creature_haloed( 5, 158, 196, S, true);    // Calf, middle, facing left
-    draw_creature_haloed(13, 252, 172, S, false);   // Highland, right
-
     // --- wildlife on the mountain: a handful of animals bounding across
     //     the ridges in parabolic hops, each on its own long cycle with a
     //     dead phase so they appear only occasionally, from either side.
@@ -214,7 +208,7 @@ void ui_title_render(void) {
     // --- title banner: slab type on black, garlands running to the edges ---
     {
         if (game.fontLarge) pd->graphics->setFont(game.fontLarge);
-        const char* T = "AUTOCRANK";
+        const char* T = "COMBAT DES REINES";
         int tW = th_text_w(game.fontLarge, T);
         int bw = tW + 52, bh = 34, bx = (SCREEN_W - bw) / 2;
         int by = 16;
@@ -231,7 +225,7 @@ void ui_title_render(void) {
         GFX_FILL(bx, by, bw, bh, kColorBlack);                     // banner
         GFX_RECT(bx + 3, by + 3, bw - 6, bh - 6, kColorWhite);
         th_text(game.fontLarge, T, (SCREEN_W - tW) / 2, by + 7, true);
-        th_chip(SCREEN_W / 2, by + bh + 9, "COMBAT DES REINES", true);
+        th_chip(SCREEN_W / 2, by + bh + 9, "THE ALPINE AUTOBATTLER", true);
     }
 
     // --- lifetime stats + control hint along the bottom ---
@@ -449,15 +443,7 @@ void ui_victory_render(void) {
                        SCREEN_W / 2, 22, th_ease_back(p, 1.8f), true);
     }
 
-    // ---- frame 15-35: podium rises, then the queen onto it ----
-    if (elapsed >= 15) {
-        int pw = 150, ph = 11;
-        int py = cyTarget + cowPx - 6;
-        th_fill(cowCx - pw / 2 + 3, py + 3, pw, ph, TH_PAT_HATCH);
-        GFX_FILL(cowCx - pw / 2, py, pw, ph, kColorWhite);
-        GFX_RECT(cowCx - pw / 2, py, pw, ph, kColorBlack);
-        th_fill(cowCx - pw / 2 + 2, py + ph - 4, pw - 4, 3, TH_PAT_25);
-    }
+    // ---- frame 15-35: the queen rises onto the medallion stage ----
     int cyTop = (elapsed >= 15)
                 ? ease_out(SCREEN_H + 10, cyTarget, elapsed - 15, 20)
                 : SCREEN_H + 10;
@@ -496,7 +482,7 @@ void ui_victory_render(void) {
         int y = ease_out(SCREEN_H + 4, 168, elapsed - 35, 20);
         int x = SCREEN_W / 2 - cardW / 2;
         th_panel(x, y, cardW, cardH);
-        th_chip(SCREEN_W / 2, y, "CHAMPIONS", true);
+        th_chip(SCREEN_W / 2, y, "WINNING TEAM", true);
         char nameBuf[40];
         team_name_str(game.playerName.adj, game.playerName.noun,
                       nameBuf, sizeof(nameBuf));
