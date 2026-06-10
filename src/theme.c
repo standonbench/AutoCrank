@@ -275,18 +275,32 @@ void th_edelweiss(int cx, int cy, int r) {
 }
 
 void th_rosette(int cx, int cy, int r) {
-    // forked ribbon tails first, so the disc overlaps them
-    int tw = r * 2 / 3, tl = r + r / 2;
-    pd->graphics->fillTriangle(cx - tw, cy + 2, cx - 2, cy + 2,
-                               cx - tw / 2 - 4, cy + tl + 4, kColorBlack);
-    pd->graphics->fillTriangle(cx + tw, cy + 2, cx + 2, cy + 2,
-                               cx + tw / 2 + 4, cy + tl + 4, kColorBlack);
-    pd->graphics->fillTriangle(cx - tw / 2 - 9, cy + tl + 9,
-                               cx - tw / 2 + 1,  cy + tl + 9,
-                               cx - tw / 2 - 4,  cy + tl - 2, kColorWhite);
-    pd->graphics->fillTriangle(cx + tw / 2 - 1, cy + tl + 9,
-                               cx + tw / 2 + 9, cy + tl + 9,
-                               cx + tw / 2 + 4, cy + tl - 2, kColorWhite);
+    // two hanging ribbon bands first, so the disc overlaps their tops;
+    // each band splays slightly outward and ends in a swallowtail notch
+    {
+        int bw = r / 2 + 2;            // band width
+        int tl = r + r / 2 + 6;        // band length below the centre
+        int sh = r / 3;                // outward splay at the bottom
+        int nd = r / 3 + 1;            // notch depth
+        for (int s = -1; s <= 1; s += 2) {
+            int topIn  = cx + s * 2;
+            int topOut = cx + s * (2 + bw);
+            int botIn  = topIn  + s * sh;
+            int botOut = topOut + s * sh;
+            int yT = cy + 1, yB = cy + tl;
+            pd->graphics->fillTriangle(topIn, yT, topOut, yT,
+                                       botOut, yB, kColorBlack);
+            pd->graphics->fillTriangle(topIn, yT, botOut, yB,
+                                       botIn, yB, kColorBlack);
+            pd->graphics->fillTriangle(botIn, yB + 1, botOut, yB + 1,
+                                       (botIn + botOut) / 2, yB - nd,
+                                       kColorWhite);
+            // 1px white edging so the band silhouette also reads when the
+            // rosette sits on a dark panel (invisible on white)
+            GFX_LINE(topIn, yT, botIn, yB, 1, kColorWhite);
+            GFX_LINE(topOut, yT, botOut, yB, 1, kColorWhite);
+        }
+    }
     // scalloped outer ring of petals
     int pr = (r * 5) / 8;
     for (int i = 0; i < 8; i++) {
@@ -393,19 +407,30 @@ void th_coin(int cx, int cy) {
     pd->graphics->drawEllipse(cx - 2, cy - 2, 5, 5, 1, 0, 360, kColorWhite);
 }
 
+// One solid heart silhouette; inset > 0 shrinks it uniformly so a second
+// pass in the background colour leaves a clean 2px outline.
+static void th_heart_solid(int cx, int cy, int inset, LCDColor col) {
+    int w = 8 - inset, h = 7 - inset;
+    GFX_ELLIPSE(cx - 7 + inset, cy - 5 + inset, w, h, col);
+    GFX_ELLIPSE(cx - 1,         cy - 5 + inset, w, h, col);
+    GFX_FILL(cx - 6 + inset, cy - 2, 13 - 2 * inset, 4 - inset, col);
+    pd->graphics->fillTriangle(cx - 6 + inset, cy + 2 - inset / 2,
+                               cx + 6 - inset, cy + 2 - inset / 2,
+                               cx, cy + 8 - inset - inset / 2, col);
+}
+
 void th_heart(int cx, int cy, bool filled, bool white) {
-    LCDColor c = white ? kColorWhite : kColorBlack;
+    LCDColor c  = white ? kColorWhite : kColorBlack;
+    LCDColor bg = white ? kColorBlack : kColorWhite;
     if (filled) {
-        GFX_ELLIPSE(cx - 7, cy - 5, 8, 7, c);
-        GFX_ELLIPSE(cx - 1, cy - 5, 8, 7, c);
-        GFX_FILL(cx - 6, cy - 2, 13, 4, c);
-        pd->graphics->fillTriangle(cx - 6, cy + 2, cx + 6, cy + 2,
-                                   cx, cy + 8, c);
+        th_heart_solid(cx, cy, 0, c);
     } else {
-        pd->graphics->drawEllipse(cx - 7, cy - 5, 8, 7, 1, 0, 360, c);
-        pd->graphics->drawEllipse(cx - 1, cy - 5, 8, 7, 1, 0, 360, c);
-        GFX_LINE(cx - 6, cy + 1, cx, cy + 8, 1, c);
-        GFX_LINE(cx + 6, cy + 1, cx, cy + 8, 1, c);
+        // a lost life: hollow heart with a hairline crack down the middle
+        th_heart_solid(cx, cy, 0, c);
+        th_heart_solid(cx, cy, 2, bg);
+        GFX_LINE(cx,     cy - 4, cx - 2, cy - 1, 1, c);
+        GFX_LINE(cx - 2, cy - 1, cx + 1, cy + 2, 1, c);
+        GFX_LINE(cx + 1, cy + 2, cx - 1, cy + 6, 1, c);
     }
 }
 
@@ -532,36 +557,99 @@ void th_backdrop(int horizonY, uint8_t flags) {
         th_bird(180, horizonY - 76 - bob);
     }
 
-    // --- far ridge: light dither, behind the main range ---
-    static const int farH[5] = { 44, 64, 38, 58, 48 };
-    int farSeg = SCREEN_W / 5 + 1;
-    int farBase = horizonY - 16;
-    for (int i = 0; i < 5; i++) {
-        int px = i * farSeg - farSeg / 3, nx = px + farSeg + farSeg / 2;
-        int peakX = (px + nx) / 2;
-        int peakY = farBase - farH[i];
-        if (peakY < 20) peakY = 20;
-        pd->graphics->fillTriangle(px, farBase, peakX, peakY, nx, farBase,
-                                   (LCDColor)TH_PAT_12);
+    // --- haze ridge: faintest, farthest — wide low humps on the horizon ---
+    {
+        static const int hazeH[3]   = { 30, 46, 36 };
+        static const int hazeOff[3] = { -18, 24, -10 };
+        int hSeg = SCREEN_W / 3 + 1;
+        int hBase = horizonY - 22;
+        for (int i = 0; i < 3; i++) {
+            int px = i * hSeg - hSeg / 2, nx = px + hSeg * 2;
+            int peakX = (px + nx) / 2 + hazeOff[i];
+            int peakY = hBase - hazeH[i];
+            if (peakY < 18) peakY = 18;
+            pd->graphics->fillTriangle(px, hBase, peakX, peakY, nx, hBase,
+                                       (LCDColor)TH_PAT_12);
+        }
     }
 
-    // --- main range: checker stone, outlined, snowcapped ---
-    static const int peakH[7] = { 34, 58, 26, 70, 40, 54, 30 };
+    // --- far ridge: mid-light dither, behind the main range ---
+    {
+        static const int farH[5]   = { 44, 64, 38, 58, 48 };
+        static const int farOff[5] = { 10, -12, 6, -9, 12 };
+        int farSeg = SCREEN_W / 5 + 1;
+        int farBase = horizonY - 16;
+        for (int i = 0; i < 5; i++) {
+            int px = i * farSeg - farSeg / 3, nx = px + farSeg + farSeg / 2;
+            int peakX = (px + nx) / 2 + farOff[i];
+            int peakY = farBase - farH[i];
+            if (peakY < 20) peakY = 20;
+            pd->graphics->fillTriangle(px, farBase, peakX, peakY, nx, farBase,
+                                       (LCDColor)TH_PAT_25);
+        }
+    }
+
+    // --- main range: checker stone, asymmetric peaks, snowcapped ---
+    // Apex skew + an occasional shoulder summit break the old row of
+    // identical isosceles triangles; snow follows each peak's actual slopes.
+    static const int peakH[7]   = { 34, 58, 26, 70, 40, 54, 30 };
+    static const int peakOff[7] = { -8,  7, -4, 11, -7,  9, -3 };
+    static const int subH[7]    = {  0, 30,  0, 38,  0, 26,  0 };
     int seg = SCREEN_W / 7 + 1;
     int mtnBase = horizonY - 10;
     for (int i = 0; i < 7; i++) {
-        int px = i * seg, peakX = px + seg / 2, nx = px + seg;
+        int px = i * seg, nx = px + seg;
+        int peakX = px + seg / 2 + peakOff[i];
         int peakY = mtnBase - peakH[i];
         if (peakY < 21) peakY = 21;
+
+        // shoulder summit first, so the main face overlaps its inner slope
+        if (subH[i] > 0) {
+            int sx = peakX + ((peakOff[i] < 0) ? seg / 3 : -seg / 3);
+            int sy = mtnBase - subH[i];
+            pd->graphics->fillTriangle(sx - seg / 3, mtnBase, sx, sy,
+                                       sx + seg / 3, mtnBase,
+                                       (LCDColor)TH_PAT_50);
+            GFX_LINE(sx - seg / 3, mtnBase, sx, sy, 1, kColorBlack);
+            GFX_LINE(sx, sy, sx + seg / 3, mtnBase, 1, kColorBlack);
+        }
+
         pd->graphics->fillTriangle(px, mtnBase, peakX, peakY, nx, mtnBase,
                                    (LCDColor)TH_PAT_50);
         GFX_LINE(px, mtnBase, peakX, peakY, 1, kColorBlack);
         GFX_LINE(peakX, peakY, nx, mtnBase, 1, kColorBlack);
-        pd->graphics->fillTriangle(peakX, peakY,
-                                   peakX - 7, peakY + 9,
-                                   peakX + 7, peakY + 9, kColorWhite);
-        GFX_LINE(peakX, peakY, peakX - 7, peakY + 9, 1, kColorBlack);
-        GFX_LINE(peakX, peakY, peakX + 7, peakY + 9, 1, kColorBlack);
+
+        // snowcap: descend `sd` px down both true slopes from the apex
+        int rise = mtnBase - peakY;
+        if (rise <= 0) continue;
+        int sd = 7 + peakH[i] / 8;
+        if (sd > rise) sd = rise;
+        int snowL = peakX + (px - peakX) * sd / rise;
+        int snowR = peakX + (nx - peakX) * sd / rise;
+        pd->graphics->fillTriangle(peakX, peakY, snowL, peakY + sd,
+                                   snowR, peakY + sd, kColorWhite);
+        GFX_LINE(peakX, peakY, snowL, peakY + sd, 1, kColorBlack);
+        GFX_LINE(peakX, peakY, snowR, peakY + sd, 1, kColorBlack);
+        // jagged hem on the tall peaks: two small snow teeth below the cap
+        if (peakH[i] >= 54) {
+            int hy = peakY + sd;
+            int t1 = snowL + (snowR - snowL) / 3;
+            int t2 = snowL + (snowR - snowL) * 2 / 3;
+            pd->graphics->fillTriangle(t1 - 4, hy, t1 + 4, hy,
+                                       t1, hy + 5, kColorWhite);
+            pd->graphics->fillTriangle(t2 - 3, hy, t2 + 5, hy,
+                                       t2 + 1, hy + 4, kColorWhite);
+        }
+
+        // sparse rock-face hatching on the sunward side of a few peaks
+        if (i == 1 || i == 3 || i == 5) {
+            for (int k = 1; k <= 2; k++) {
+                int y = peakY + sd + 5 + k * 7;
+                if (y >= mtnBase - 2) break;
+                int xr = peakX + (nx - peakX) * (y - peakY) / rise - 3;
+                GFX_LINE(xr, y, xr - 6 - k * 2, y + 3, 1, kColorBlack);
+            }
+        }
     }
 
     // --- forest band with scalloped treetops ---

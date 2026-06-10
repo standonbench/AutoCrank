@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 static LCDBitmap* g_petBmp[PET_COUNT];
+static uint8_t    g_petSize[PET_COUNT];   // native px (64 = Scale2x asset)
 static LCDBitmap* g_foodBmp[FOOD_COUNT];
 static LCDBitmap* g_titleBg;
 static LCDBitmap* g_nameBg;
@@ -22,9 +23,17 @@ void images_init(void)
     const char* err = NULL;
     for (int i = 0; i < PET_COUNT; i++) {
         if (PETS[i].spriteId == NO_SPRITE) continue;  // procedural-only pet
+        // Prefer the 64x64 Scale2x asset (tools/upscale_pets.py); renderers
+        // divide the draw scale by (size/32) so call sites are unaffected.
+        snprintf(path, sizeof(path), "images/pets/pet64_%02d",
+                 (int)PETS[i].spriteId);
+        g_petBmp[i] = pd->graphics->loadBitmap(path, &err);
+        g_petSize[i] = 64;
+        if (g_petBmp[i]) continue;
         snprintf(path, sizeof(path), "images/pets/pet_%02d",
                  (int)PETS[i].spriteId);
         g_petBmp[i] = pd->graphics->loadBitmap(path, &err);
+        g_petSize[i] = 32;
         // A missing PNG drops this pet onto the procedural fallback in
         // draw_creature_xform, which allocates a 32x32 scratch bitmap EVERY
         // frame it's drawn — a per-frame malloc in the battle hot path. All
@@ -42,6 +51,9 @@ void images_init(void)
 }
 
 LCDBitmap* image_pet(uint8_t id)  { return id < PET_COUNT  ? g_petBmp[id]  : NULL; }
+int image_pet_size(uint8_t id) {
+    return (id < PET_COUNT && g_petSize[id]) ? (int)g_petSize[id] : 32;
+}
 LCDBitmap* image_food(uint8_t id) { return id < FOOD_COUNT ? g_foodBmp[id] : NULL; }
 LCDBitmap* image_title_bg(void)   { return g_titleBg; }
 LCDBitmap* image_name_bg(void)    { return g_nameBg; }

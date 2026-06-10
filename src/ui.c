@@ -26,20 +26,38 @@ static void draw_flash_overlay(bool on) {
     pd->graphics->setDrawMode(kDrawModeCopy);
 }
 
-// Deterministic confetti rain (win celebrations). Stateless: dot index +
-// frame count fully determine every position, so it loops cleanly.
+// Deterministic confetti (win celebrations). Stateless: piece index + frame
+// count fully determine every position. A few chunky tumbling ribbons,
+// diamonds and flakes that sway as they fall — festive, not rain.
 static void draw_confetti(int elapsed) {
-    const int N = 36;
+    const int N = 16;
     for (int i = 0; i < N; i++) {
-        int x = ((i * 1657) % SCREEN_W);
-        int speed = 2 + ((i * 97) % 4);
-        int phase = (i * 213) % 90;
-        int t = (elapsed + phase) % 120;
-        int y = (t * speed) % (SCREEN_H + 8) - 4;
-        if ((i & 1) == 0)
-            GFX_FILL(x, y, 2, 2, kColorBlack);
-        else
-            GFX_FILL(x, y, 1, 3, kColorBlack);
+        int x0 = ((i * 1657 + 83) % SCREEN_W);
+        int speed = 2 + ((i * 97) % 3);
+        int phase = (i * 213) % 110;
+        int t = elapsed + phase;
+        int y = ((t * speed) % (SCREEN_H + 16)) - 8;
+        int x = x0 + (int)(sinf((float)t * 0.07f + (float)i * 1.7f) * 7.0f);
+        float spin = (float)t * 0.12f + (float)i;
+        int dx = (int)(cosf(spin) * 4.0f);
+        int dy = (int)(sinf(spin) * 2.0f);
+        switch (i % 3) {
+            case 0:   // tumbling ribbon
+                GFX_LINE(x - dx, y - dy, x + dx, y + dy, 2, kColorBlack);
+                break;
+            case 1: { // diamond
+                pd->graphics->fillTriangle(x - 3, y, x + 3, y, x, y - 4,
+                                           kColorBlack);
+                pd->graphics->fillTriangle(x - 3, y, x + 3, y, x, y + 4,
+                                           kColorBlack);
+                break;
+            }
+            default: { // square flake, foreshortened as it tumbles
+                int w = 2 + ((dx > 0) ? dx : -dx);
+                GFX_RECT(x - w / 2, y - 2, w, 5, kColorBlack);
+                break;
+            }
+        }
     }
 }
 
@@ -57,24 +75,6 @@ static void draw_snow(int elapsed) {
         GFX_FILL(x, y, 2, 2, kColorWhite);
         GFX_RECT(x - 1, y - 1, 4, 4, kColorBlack);
     }
-}
-
-// Draw a pet sprite with a 1px white halo so it stays legible over busy
-// backdrops (title scene). Off the hot path.
-static void draw_creature_haloed(uint8_t petId, int cx, int cy,
-                                 float scale, bool flip) {
-    LCDBitmap* sprite = image_pet(petId);
-    if (sprite) {
-        float s = flip ? -scale : scale;
-        pd->graphics->setDrawMode(kDrawModeFillWhite);
-        for (int ox = -1; ox <= 1; ox++)
-            for (int oy = -1; oy <= 1; oy++)
-                if (ox || oy)
-                    pd->graphics->drawRotatedBitmap(sprite, cx + ox, cy + oy,
-                                                    0.0f, 0.5f, 0.5f, s, scale);
-        pd->graphics->setDrawMode(kDrawModeCopy);
-    }
-    draw_creature_xform(petId, cx, cy, scale, 0.0f, flip);
 }
 
 // ---------------------------------------------------------------------------
@@ -147,8 +147,42 @@ void ui_title_render(void) {
     draw_creature_haloed( 5, 158, 196, S, true);    // Calf, middle, facing left
     draw_creature_haloed(13, 252, 172, S, false);   // Highland, right
 
-    // --- one tiny calf on an endless walk across the far pasture ---
+    // --- wildlife on the mountain: a handful of animals bounding across
+    //     the ridges in parabolic hops, each on its own long cycle with a
+    //     dead phase so they appear only occasionally, from either side.
+    //     Plus the original calf, forever walking home.
     {
+        typedef struct {
+            uint8_t petId;
+            int16_t x0;          // where the run starts
+            int16_t baseY;       // ridge line the run follows
+            int8_t  dir;         // +1 = bounds rightward, -1 = leftward
+            uint8_t spdQ4;       // px/frame in 1/16ths
+            uint16_t runPx;      // length of the run before vanishing
+            uint16_t period;     // full cycle length in frames (30fps)
+            uint16_t phase;      // cycle offset so they desynchronise
+            uint8_t hopLen;      // px per bound
+            uint8_t hopH;        // bound height in px
+            uint8_t scaleQ4;     // sprite scale in 1/16ths
+        } TitleHopper;
+        static const TitleHopper H[4] = {
+            { 4, -18, 150, +1, 22, 150,  800,   0, 34, 9, 12 }, // Rabbit
+            { 0, 265, 166, -1, 18, 130, 1050, 380, 26, 7, 11 }, // Squirrel
+            { 1, 275, 188, -1, 26, 180,  900, 620, 40, 8, 13 }, // Pup
+            { 4, -18, 176, +1, 24, 210, 1150, 250, 30, 8, 12 }, // Rabbit
+        };
+        for (int i = 0; i < 4; i++) {
+            const TitleHopper* h = &H[i];
+            int t = (int)((game.frameCount + h->phase) % h->period);
+            int dist = t * h->spdQ4 / 16;
+            if (dist > (int)h->runPx) continue;         // resting off-screen
+            int wx = h->x0 + h->dir * dist;
+            float hop = sinf(PI_F * (float)(dist % h->hopLen)
+                             / (float)h->hopLen);
+            int wy = h->baseY - (int)(hop * (float)h->hopH);
+            draw_creature_haloed(h->petId, wx, wy,
+                                 (float)h->scaleQ4 / 16.0f, h->dir < 0);
+        }
         int cycle = (int)(game.frameCount % 2600u);
         int wx = SCREEN_W + 30 - (int)((float)cycle * 0.19f);
         int wy = 157 + (int)(sinf((float)game.frameCount * 0.30f) * 1.2f);
@@ -300,10 +334,10 @@ void ui_gameover_render(void) {
                        SCREEN_W / 2, 22, th_ease_back(p, 1.5f), true);
     }
 
-    // The lone Highland drops in from above at frame 15.
+    // The last hen drops in from above at frame 15.
     if (elapsed >= 15) {
         int y = ease_out(-50, 78, elapsed - 15, 18);
-        draw_creature_scaled(13, SCREEN_W / 2 - 32, y, 2);
+        draw_creature_scaled(2, SCREEN_W / 2 - 32, y, 2);
     }
 
     // Memorial plank slides up from below at frame 35 — name, epitaph,
@@ -369,6 +403,32 @@ void ui_victory_render(void) {
     th_backdrop(154, TH_BG_RICH);
     int elapsed = (int)game.resultTimer;
 
+    int cowCx = SCREEN_W / 2;
+    int cs = 3, cowPx = 32 * cs;
+    int cyTarget = 60;                       // sprite top once seated
+    int cowMidY = cyTarget + cowPx / 2;      // sprite centre
+
+    // ---- frame 12+: festival medallion behind the queen — a white disc
+    //      with slowly turning sunburst rays, so she's presented on a
+    //      stage instead of pasted onto the pasture ----
+    if (elapsed >= 12) {
+        int rx = 100, ry = 54;
+        GFX_ELLIPSE(cowCx - rx, cowMidY - ry, rx * 2, ry * 2, kColorWhite);
+        float a0 = (float)game.frameCount * 0.005f;
+        for (int i = 0; i < 9; i++) {
+            float a = a0 + (float)i * (2.0f * PI_F / 9.0f);
+            float b = a + (2.0f * PI_F / 22.0f);
+            int x1 = cowCx + (int)(cosf(a) * (float)(rx - 4));
+            int y1 = cowMidY + (int)(sinf(a) * (float)(ry - 3));
+            int x2 = cowCx + (int)(cosf(b) * (float)(rx - 4));
+            int y2 = cowMidY + (int)(sinf(b) * (float)(ry - 3));
+            pd->graphics->fillTriangle(cowCx, cowMidY, x1, y1, x2, y2,
+                                       (LCDColor)TH_PAT_25);
+        }
+        pd->graphics->drawEllipse(cowCx - rx, cowMidY - ry, rx * 2, ry * 2,
+                                  2, 0, 360, kColorBlack);
+    }
+
     // ---- frame 0-10: diagonal banner wipe leaves the black title band ----
     int wipeW = SCREEN_W + SCREEN_H;
     int wipeProgress = (elapsed < 10) ? (wipeW * elapsed / 10) : wipeW;
@@ -382,42 +442,58 @@ void ui_victory_render(void) {
         th_pennant_garland(-8, SCREEN_W + 8, 46, 7);
     }
 
-    // ---- frame 5-20: CHAMPION! stamps in ----
+    // ---- frame 5-20: LA REINE! stamps in ----
     if (elapsed >= 5) {
         float p = (elapsed < 20) ? ((float)(elapsed - 5) / 15.0f) : 1.0f;
-        th_text_scaled(game.fontLarge, "CHAMPION!",
+        th_text_scaled(game.fontLarge, "LA REINE!",
                        SCREEN_W / 2, 22, th_ease_back(p, 1.8f), true);
     }
 
-    // ---- frame 15-35: the queen rises from below into position ----
-    int cs = 3, cowPx = 32 * cs, cowCx = SCREEN_W / 2;
-    int cyTarget = 58;
+    // ---- frame 15-35: podium rises, then the queen onto it ----
+    if (elapsed >= 15) {
+        int pw = 150, ph = 11;
+        int py = cyTarget + cowPx - 6;
+        th_fill(cowCx - pw / 2 + 3, py + 3, pw, ph, TH_PAT_HATCH);
+        GFX_FILL(cowCx - pw / 2, py, pw, ph, kColorWhite);
+        GFX_RECT(cowCx - pw / 2, py, pw, ph, kColorBlack);
+        th_fill(cowCx - pw / 2 + 2, py + ph - 4, pw - 4, 3, TH_PAT_25);
+    }
     int cyTop = (elapsed >= 15)
                 ? ease_out(SCREEN_H + 10, cyTarget, elapsed - 15, 20)
                 : SCREEN_H + 10;
     draw_creature_scaled(13, cowCx - cowPx / 2, cyTop, cs);
 
-    // ---- frame 22-34: prize rosettes stamp in on either side ----
+    // ---- frame 28-42: the winner's flower garland blooms around her
+    //      chest, one edelweiss at a time (Combat des Reines style) ----
+    if (elapsed >= 28) {
+        int gcy = cowMidY + 8;
+        for (int i = 0; i < 7; i++) {
+            if (elapsed < 28 + i * 2) break;
+            float a = PI_F * (float)i / 6.0f;       // lower half-ellipse
+            int fx = cowCx + (int)(cosf(a) * 38.0f);
+            int fy = gcy + (int)(sinf(a) * 20.0f);
+            th_edelweiss(fx, fy, i == 3 ? 5 : 4);   // centre bloom largest
+        }
+    }
+
+    // ---- frame 22-34: prize rosettes stamp in on the medallion rim ----
     if (elapsed >= 22) {
         float p = (elapsed < 34) ? ((float)(elapsed - 22) / 12.0f) : 1.0f;
         int rr = (int)(16.0f * th_ease_back(p, 1.6f));
         if (rr > 2) {
-            th_rosette(104, 96, rr);
-            th_rosette(296, 96, rr);
+            th_rosette(96,  92, rr);
+            th_rosette(304, 92, rr);
         }
     }
 
-    // ---- frame 25-45: edelweiss arch materialises one-by-one ----
-    static const int arch[5] = { 6, 2, 0, 2, 6 };
-    for (int i = 0; i < 5; i++) {
-        if (elapsed >= 25 + i * 3)
-            th_edelweiss(cowCx - 44 + i * 22, cyTarget + 12 + arch[i], 4);
-    }
+    // ---- frame 18+: QUEEN OF THE ALPS sub-banner under the title band ----
+    if (elapsed >= 18)
+        th_chip(SCREEN_W / 2, 52, "QUEEN OF THE ALPS", true);
 
     // ---- frame 35-55: champions plate slides up ----
     if (elapsed >= 35) {
         const int cardW = 250, cardH = 54;
-        int y = ease_out(SCREEN_H + 4, 158, elapsed - 35, 20);
+        int y = ease_out(SCREEN_H + 4, 168, elapsed - 35, 20);
         int x = SCREEN_W / 2 - cardW / 2;
         th_panel(x, y, cardW, cardH);
         th_chip(SCREEN_W / 2, y, "CHAMPIONS", true);
@@ -429,13 +505,13 @@ void ui_victory_render(void) {
                       11, false);
     }
 
-    // ---- frame 50+: confetti + sparkles ----
-    if (elapsed >= 50) draw_confetti(elapsed);
-    if (elapsed >= 60) draw_sparkles(cowCx, cyTarget + cowPx / 2 - 4, 70, elapsed);
+    // ---- frame 45+: confetti, then sparkles winking on the medallion ----
+    if (elapsed >= 45) draw_confetti(elapsed);
+    if (elapsed >= 60) draw_sparkles(cowCx, cowMidY - 4, 70, elapsed);
 
     // ---- frame 70+: PRESS A blink ----
     if (elapsed >= 70 && ((game.frameCount / 15) & 1))
-        th_text_halo_center(game.fontBold, "PRESS A", SCREEN_W / 2, 222);
+        th_text_halo_center(game.fontBold, "PRESS A", SCREEN_W / 2, 226);
 }
 
 // ---------------------------------------------------------------------------

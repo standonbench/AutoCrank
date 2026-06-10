@@ -251,8 +251,14 @@ void draw_creature(uint8_t petId, int bx, int by)
     LCDBitmap* sprite = image_pet(petId);
     if (sprite) {
         // Our pipeline ships sprites as BLACK-on-transparent — blit straight
-        // onto the canvas; the alpha mask keeps the background clean.
-        pd->graphics->drawBitmap(sprite, bx, by, kBitmapUnflipped);
+        // onto the canvas; the alpha mask keeps the background clean. A 64px
+        // Scale2x asset draws at half scale to keep the 32px footprint.
+        if (image_pet_size(petId) == 32) {
+            pd->graphics->drawBitmap(sprite, bx, by, kBitmapUnflipped);
+        } else {
+            pd->graphics->drawRotatedBitmap(sprite, bx + 16, by + 16, 0.0f,
+                                            0.5f, 0.5f, 0.5f, 0.5f);
+        }
         return;
     }
     switch (petId) {
@@ -299,9 +305,12 @@ void draw_creature_xform(uint8_t petId, int cx, int cy, float scale,
 {
     LCDBitmap* sprite = image_pet(petId);
     if (sprite) {
-        // 32×32 native sprite, black-on-transparent — blit at unit scale.
+        // Native sprite, black-on-transparent. `scale` is expressed in
+        // 32px units; a 64px Scale2x asset halves it so every call site
+        // keeps its on-screen size but gains the smoother edges.
+        float k = scale * 32.0f / (float)image_pet_size(petId);
         pd->graphics->drawRotatedBitmap(sprite, cx, cy, deg, 0.5f, 0.5f,
-                                        flip ? -scale : scale, scale);
+                                        flip ? -k : k, k);
         return;
     }
     LCDBitmap* bmp = pd->graphics->newBitmap(32, 32, kColorWhite);
@@ -320,4 +329,25 @@ void draw_creature_scaled(uint8_t petId, int x, int y, float scale)
 {
     int h = (int)(16.0f * scale);
     draw_creature_xform(petId, x + h, y + h, scale, 0.0f, false);
+}
+
+// Draw a pet sprite with a 1px white halo so it stays legible over busy
+// backdrops (title scene) and reads in front of selection rings. Off the
+// hot path.
+void draw_creature_haloed(uint8_t petId, int cx, int cy,
+                          float scale, bool flip)
+{
+    LCDBitmap* sprite = image_pet(petId);
+    if (sprite) {
+        float k = scale * 32.0f / (float)image_pet_size(petId);
+        float s = flip ? -k : k;
+        pd->graphics->setDrawMode(kDrawModeFillWhite);
+        for (int ox = -1; ox <= 1; ox++)
+            for (int oy = -1; oy <= 1; oy++)
+                if (ox || oy)
+                    pd->graphics->drawRotatedBitmap(sprite, cx + ox, cy + oy,
+                                                    0.0f, 0.5f, 0.5f, s, k);
+        pd->graphics->setDrawMode(kDrawModeCopy);
+    }
+    draw_creature_xform(petId, cx, cy, scale, 0.0f, flip);
 }

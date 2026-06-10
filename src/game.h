@@ -368,6 +368,7 @@ CombinePreview shop_combine_preview(uint8_t petId);
 // images.c
 void images_init(void);
 LCDBitmap* image_pet(uint8_t id);
+int image_pet_size(uint8_t id);    // native px of the loaded asset (32/64)
 LCDBitmap* image_food(uint8_t id);
 LCDBitmap* image_title_bg(void);
 LCDBitmap* image_name_bg(void);
@@ -487,6 +488,8 @@ void draw_cow(int bx, int by, int variant);
 void draw_creature_scaled(uint8_t petId, int x, int y, float scale);
 void draw_creature_xform(uint8_t petId, int cx, int cy, float scale,
                          float deg, bool flip);
+void draw_creature_haloed(uint8_t petId, int cx, int cy, float scale,
+                          bool flip);
 
 // sound.c
 void sound_init(void);

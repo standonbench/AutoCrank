@@ -154,7 +154,7 @@ void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
         pd->graphics->drawEllipse(cx - 18, baseY - 8, 36, 12, 1, 0, 360,
                                   (LCDColor)TH_PAT_50);
         if (selected)
-            pd->graphics->drawEllipse(cx - 21, baseY - 11, 42, 18, 2, 0, 360,
+            pd->graphics->drawEllipse(cx - 21, baseY - 10, 42, 14, 2, 0, 360,
                                       kColorBlack);
         return;
     }
@@ -162,14 +162,21 @@ void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
     // ground shadow
     GFX_ELLIPSE(cx - half + 3, baseY - 5, spr - 6, 8, (LCDColor)TH_PAT_50);
 
-    // selection / picked ring under the feet
+    // selection / picked ring: a flat ground-perspective ellipse around the
+    // feet. The sprite is drawn haloed on top so the ring reads as passing
+    // BEHIND the pet (sprites blit white-transparent, so without the halo
+    // the ring would show through the body).
     if (selected || picked) {
-        pd->graphics->drawEllipse(cx - half - 1, baseY - 9, spr + 2, 16,
+        pd->graphics->drawEllipse(cx - half - 3, baseY - 9, spr + 6, 14,
                                   picked ? 3 : 2, 0, 360, kColorBlack);
     }
 
     // sprite (feet on baseY) — faceLeft mirrors the right-facing art
-    draw_creature_xform(petId, cx, baseY - half, spriteScale, 0.0f, faceLeft);
+    if (selected || picked)
+        draw_creature_haloed(petId, cx, baseY - half, spriteScale, faceLeft);
+    else
+        draw_creature_xform(petId, cx, baseY - half, spriteScale, 0.0f,
+                            faceLeft);
 
     // level pips above the head
     int npip = level; if (npip > MAX_PET_LEVEL) npip = MAX_PET_LEVEL;
@@ -208,96 +215,180 @@ void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,
 // Each food gets its own 1-bit silhouette so the shop reads at a glance.
 // Sprites sit in roughly a 22x26 box, anchored at (cx, baseY) = bottom-centre.
 static void render_food_hay(int cx, int baseY) {
-    // Trapezoidal bundle with diagonal straws and a binding band.
-    int yT = baseY - 23, yB = baseY - 4;
-    int xtl = cx - 6, xtr = cx + 6;
+    // Sheaf of hay: domed bundle, two binding bands, loose straws poking
+    // out the top, dither shading on the shaded flank.
+    int yT = baseY - 22, yB = baseY - 4;
     int xbl = cx - 10, xbr = cx + 10;
-    GFX_FILL(xbl, yT + 4, 21, yB - yT - 4, kColorWhite);
-    GFX_LINE(xtl, yT, xbl, yT + 4, 2, kColorBlack);
-    GFX_LINE(xtr, yT, xbr, yT + 4, 2, kColorBlack);
-    GFX_LINE(xtl, yT, xtr, yT, 2, kColorBlack);
-    GFX_LINE(xbl, yT + 4, xbl, yB, 2, kColorBlack);
-    GFX_LINE(xbr, yT + 4, xbr, yB, 2, kColorBlack);
+    // loose straws first, so the bundle overlaps their roots
+    GFX_LINE(cx - 4, yT + 2, cx - 8, yT - 4, 1, kColorBlack);
+    GFX_LINE(cx,     yT + 2, cx + 1, yT - 5, 1, kColorBlack);
+    GFX_LINE(cx + 4, yT + 2, cx + 8, yT - 3, 1, kColorBlack);
+    // domed bundle: rounded crown over a flared body
+    GFX_ELLIPSE(cx - 8, yT - 2, 16, 12, kColorWhite);
+    pd->graphics->drawEllipse(cx - 8, yT - 2, 16, 12, 2, 90, 270, kColorBlack);
+    pd->graphics->fillTriangle(cx - 8, yT + 3, cx + 8, yT + 3,
+                               cx, yB, kColorWhite);
+    GFX_FILL(xbl, yT + 8, 21, yB - yT - 8, kColorWhite);
+    GFX_LINE(cx - 8, yT + 3, xbl, yB, 2, kColorBlack);
+    GFX_LINE(cx + 8, yT + 3, xbr, yB, 2, kColorBlack);
     GFX_LINE(xbl, yB, xbr, yB, 2, kColorBlack);
-    GFX_LINE(cx - 7, yB - 1, cx,     yT + 5, 1, kColorBlack);
-    GFX_LINE(cx - 2, yB - 1, cx + 5, yT + 5, 1, kColorBlack);
-    GFX_LINE(cx + 4, yB - 1, cx - 3, yT + 5, 1, kColorBlack);
-    GFX_FILL(xbl - 1, yT + 11, 22, 3, kColorBlack);          // binding band
+    // shaded flank
+    pd->graphics->fillTriangle(cx + 7, yT + 5, xbr - 2, yB - 2,
+                               cx + 2, yB - 2, (LCDColor)TH_PAT_25);
+    // straw strokes + two binding bands
+    GFX_LINE(cx - 6, yB - 2, cx - 1, yT + 6, 1, kColorBlack);
+    GFX_LINE(cx,     yB - 2, cx + 4, yT + 6, 1, kColorBlack);
+    GFX_FILL(xbl,     yT + 9,  20, 2, kColorBlack);
+    GFX_FILL(xbl - 1, yT + 15, 22, 2, kColorBlack);
 }
 
 static void render_food_edelweiss(int cx, int baseY) {
-    // 5 white round petals around a black centre + short stem.
-    int cy = baseY - 14;
-    const int px[5] = { 0,  6,  4, -4, -6 };
-    const int py[5] = {-7, -2,  5,  5, -2 };
-    GFX_LINE(cx, cy + 3, cx, baseY - 4, 2, kColorBlack);     // stem
-    for (int i = 0; i < 5; i++) {
-        int ex = cx + px[i] - 4, ey = cy + py[i] - 4;
-        GFX_ELLIPSE(ex, ey, 9, 9, kColorWhite);
-        pd->graphics->drawEllipse(ex, ey, 9, 9, 2, 0, 360, kColorBlack);
+    // Star of pointed white petals (the real flower's shape) around a
+    // fuzzy dotted centre, on a stem with one small leaf.
+    int cy = baseY - 15;
+    GFX_LINE(cx, cy + 3, cx, baseY - 4, 2, kColorBlack);       // stem
+    GFX_LINE(cx, baseY - 8, cx + 4, baseY - 11, 2, kColorBlack); // leaf
+    for (int i = 0; i < 6; i++) {
+        float a = -PI_F / 2.0f + (float)i * (PI_F / 3.0f);
+        int tx = cx + (int)(cosf(a) * 10.0f);
+        int ty = cy + (int)(sinf(a) * 10.0f);
+        int lx = cx + (int)(cosf(a + 0.55f) * 4.0f);
+        int ly = cy + (int)(sinf(a + 0.55f) * 4.0f);
+        int rx = cx + (int)(cosf(a - 0.55f) * 4.0f);
+        int ry = cy + (int)(sinf(a - 0.55f) * 4.0f);
+        pd->graphics->fillTriangle(lx, ly, rx, ry, tx, ty, kColorWhite);
+        GFX_LINE(lx, ly, tx, ty, 1, kColorBlack);
+        GFX_LINE(rx, ry, tx, ty, 1, kColorBlack);
     }
-    GFX_ELLIPSE(cx - 3, cy - 3, 7, 7, kColorBlack);          // centre
+    // fuzzy centre: black disc ringed by tiny floret dots
+    GFX_ELLIPSE(cx - 3, cy - 3, 7, 7, kColorBlack);
+    GFX_FILL(cx - 1, cy - 1, 2, 2, kColorWhite);
+    GFX_FILL(cx - 4, cy - 5, 1, 1, kColorBlack);
+    GFX_FILL(cx + 3, cy - 4, 1, 1, kColorBlack);
+    GFX_FILL(cx + 4, cy + 2, 1, 1, kColorBlack);
+    GFX_FILL(cx - 5, cy + 3, 1, 1, kColorBlack);
 }
 
 static void render_food_salt(int cx, int baseY) {
-    // Chunky block with dotted crystal texture.
+    // Salt-lick block drawn as a small iso cube: white front face, dithered
+    // side face, top face catching the light, sparkle glints up front.
     int yT = baseY - 22, yB = baseY - 4;
-    int xL = cx - 10;
-    GFX_FILL(xL, yT, 20, yB - yT, kColorWhite);
-    GFX_RECT(xL, yT, 20, yB - yT, kColorBlack);
-    GFX_RECT(xL + 1, yT + 1, 18, yB - yT - 2, kColorBlack);  // double border
-    for (int dy = yT + 4; dy < yB - 2; dy += 5) {
-        for (int dx = xL + 4; dx < xL + 20 - 2; dx += 5) {
-            GFX_FILL(dx, dy, 2, 2, kColorBlack);
-        }
-    }
+    int fL = cx - 10, fR = cx + 4;          // front face
+    int d = 5;                              // iso depth
+    // top face
+    pd->graphics->fillTriangle(fL, yT + d, fL + d, yT, fR + d, yT, kColorWhite);
+    pd->graphics->fillTriangle(fL, yT + d, fR + d, yT, fR, yT + d, kColorWhite);
+    // side face, shaded
+    pd->graphics->fillTriangle(fR, yT + d, fR + d, yT, fR + d, yB - d,
+                               (LCDColor)TH_PAT_25);
+    pd->graphics->fillTriangle(fR, yT + d, fR + d, yB - d, fR, yB,
+                               (LCDColor)TH_PAT_25);
+    // front face
+    GFX_FILL(fL, yT + d, fR - fL, yB - yT - d, kColorWhite);
+    // outline the silhouette + the two visible inner edges
+    GFX_LINE(fL, yT + d, fL + d, yT, 1, kColorBlack);
+    GFX_LINE(fL + d, yT, fR + d, yT, 2, kColorBlack);
+    GFX_LINE(fR + d, yT, fR + d, yB - d, 2, kColorBlack);
+    GFX_LINE(fR + d, yB - d, fR, yB, 1, kColorBlack);
+    GFX_RECT(fL, yT + d, fR - fL, yB - yT - d, kColorBlack);
+    GFX_LINE(fL + 1, yT + d + 1, fR - 1, yT + d + 1, 1, kColorBlack);
+    // sparkle glints: tiny plus signs on the front face
+    GFX_FILL(cx - 6, yT + 10, 1, 3, kColorBlack);
+    GFX_FILL(cx - 7, yT + 11, 3, 1, kColorBlack);
+    GFX_FILL(cx,     yB - 8,  1, 3, kColorBlack);
+    GFX_FILL(cx - 1, yB - 7,  3, 1, kColorBlack);
 }
 
 static void render_food_cowbell(int cx, int baseY) {
-    // Trapezoidal bell with a hoop handle and a clapper.
-    int yT = baseY - 23, yB = baseY - 4;
-    int xtl = cx - 4, xtr = cx + 4;
-    int xbl = cx - 10, xbr = cx + 10;
-    pd->graphics->drawEllipse(cx - 3, yT - 5, 7, 7, 2, 0, 360, kColorBlack);
-    GFX_FILL(xbl + 1, yT + 2, 19, yB - yT - 4, kColorWhite);
-    GFX_LINE(xtl, yT, xbl, yB - 2, 2, kColorBlack);
-    GFX_LINE(xtr, yT, xbr, yB - 2, 2, kColorBlack);
-    GFX_LINE(xtl, yT, xtr, yT, 2, kColorBlack);
-    GFX_FILL(xbl - 1, yB - 3, 22, 3, kColorBlack);           // lip
-    GFX_FILL(cx - 2, yB - 1, 4, 5, kColorBlack);             // clapper
+    // Swiss bell: leather strap with buckle, flared body, dark mouth band,
+    // dither shading on one cheek and a tiny engraved cross.
+    int yT = baseY - 21, yB = baseY - 4;
+    // strap + buckle
+    GFX_FILL(cx - 3, yT - 6, 6, 7, kColorBlack);
+    GFX_FILL(cx - 1, yT - 4, 2, 2, kColorWhite);
+    // body: straight shoulders flaring out near the mouth
+    int sL = cx - 5, sR = cx + 5;            // shoulder
+    int fL = cx - 8, fR = cx + 8;            // waist where the flare begins
+    int mL = cx - 11, mR = cx + 11;          // mouth
+    int yW = yB - 7;
+    GFX_FILL(sL, yT, sR - sL, yW - yT, kColorWhite);
+    pd->graphics->fillTriangle(sL, yT, fL, yW, sL, yW, kColorWhite);
+    pd->graphics->fillTriangle(sR, yT, sR, yW, fR, yW, kColorWhite);
+    pd->graphics->fillTriangle(fL, yW, mL, yB - 2, fR, yW, kColorWhite);
+    pd->graphics->fillTriangle(fR, yW, mL, yB - 2, mR, yB - 2, kColorWhite);
+    GFX_LINE(sL, yT, fL, yW, 2, kColorBlack);
+    GFX_LINE(sR, yT, fR, yW, 2, kColorBlack);
+    GFX_LINE(fL, yW, mL, yB - 2, 2, kColorBlack);
+    GFX_LINE(fR, yW, mR, yB - 2, 2, kColorBlack);
+    GFX_LINE(sL, yT, sR, yT, 2, kColorBlack);
+    // shaded cheek + engraved cross
+    pd->graphics->fillTriangle(sR - 2, yT + 3, fR - 1, yW, cx + 1, yW,
+                               (LCDColor)TH_PAT_25);
+    GFX_FILL(cx - 1, yT + 5, 2, 6, kColorBlack);
+    GFX_FILL(cx - 3, yT + 7, 6, 2, kColorBlack);
+    // mouth band + clapper
+    GFX_FILL(mL - 1, yB - 3, mR - mL + 2, 3, kColorBlack);
+    GFX_FILL(cx - 2, yB - 1, 4, 5, kColorBlack);
 }
 
 static void render_food_cheese(int cx, int baseY) {
-    // Triangular wedge filled with scanlines, with a few holes.
-    int yT = baseY - 22, yB = baseY - 4;
-    int H = yB - yT;
-    for (int y = yT + 1; y < yB; y++) {
-        int half = ((y - yT) * 10) / H;
-        if (half > 0)
-            GFX_FILL(cx - half, y, half * 2, 1, kColorWhite);
-    }
-    GFX_LINE(cx, yT, cx - 10, yB, 2, kColorBlack);
-    GFX_LINE(cx, yT, cx + 10, yB, 2, kColorBlack);
-    GFX_LINE(cx - 10, yB, cx + 10, yB, 2, kColorBlack);
-    GFX_ELLIPSE(cx - 4, yB - 7, 4, 4, kColorBlack);
-    GFX_ELLIPSE(cx + 1, yB - 5, 3, 3, kColorBlack);
-    GFX_ELLIPSE(cx - 1, yB - 13, 3, 3, kColorBlack);
+    // Alpine cheese wedge lying point-toward-the-viewer: pale cut face on
+    // top, dithered rind on the side, holes of mixed sizes (one bitten by
+    // the edge so the silhouette reads as cheese instantly).
+    int yB = baseY - 4;
+    int apexX = cx - 11, apexY = yB - 9;     // wedge point, at left
+    int bR = cx + 11;                        // back (rind) edge, at right
+    int rindT = yB - 16;                     // top of the rind face
+    // cut face: the sloping top plane
+    pd->graphics->fillTriangle(apexX, apexY, bR, rindT, bR, rindT + 5,
+                               kColorWhite);
+    // body below the face
+    pd->graphics->fillTriangle(apexX, apexY, bR, rindT + 5, bR, yB,
+                               kColorWhite);
+    pd->graphics->fillTriangle(apexX, apexY, bR, yB, apexX + 4, yB,
+                               kColorWhite);
+    // rind: dithered band down the right side
+    pd->graphics->fillTriangle(bR - 4, rindT + 2, bR, rindT, bR, yB,
+                               (LCDColor)TH_PAT_50);
+    pd->graphics->fillTriangle(bR - 4, rindT + 2, bR, yB, bR - 4, yB,
+                               (LCDColor)TH_PAT_50);
+    // outline
+    GFX_LINE(apexX, apexY, bR, rindT, 2, kColorBlack);
+    GFX_LINE(bR, rindT, bR, yB, 2, kColorBlack);
+    GFX_LINE(apexX, apexY, apexX + 4, yB, 2, kColorBlack);
+    GFX_LINE(apexX + 4, yB, bR, yB, 2, kColorBlack);
+    // holes: two round, one bitten by the top edge
+    GFX_ELLIPSE(cx - 2, yB - 8, 5, 5, kColorBlack);
+    GFX_ELLIPSE(cx + 4, yB - 12, 3, 3, kColorBlack);
+    GFX_ELLIPSE(cx - 5, apexY + 1, 4, 3, kColorBlack);
 }
 
 static void render_food_milk(int cx, int baseY) {
-    // Tall bottle with a narrow neck and a black label band.
+    // Alpine milk churn: domed lid with a knob, two side handles, belly
+    // bands, dither shading down one side.
     int yT = baseY - 26, yB = baseY - 4;
-    int xL = cx - 7;
-    // neck
-    GFX_FILL(cx - 4, yT, 8, 5, kColorWhite);
-    GFX_RECT(cx - 4, yT, 8, 5, kColorBlack);
-    // body
-    int bodyY = yT + 5;
-    int bodyH = yB - bodyY;
-    GFX_FILL(xL, bodyY, 14, bodyH, kColorWhite);
-    GFX_RECT(xL, bodyY, 14, bodyH, kColorBlack);
-    GFX_RECT(xL + 1, bodyY + 1, 12, bodyH - 2, kColorBlack);
-    GFX_FILL(xL + 2, bodyY + 5, 10, 5, kColorBlack);          // label
+    int xL = cx - 8, xR = cx + 8;
+    int lidY = yT + 4;
+    // knob + domed lid
+    GFX_FILL(cx - 2, yT, 4, 4, kColorBlack);
+    GFX_ELLIPSE(cx - 9, lidY - 3, 18, 8, kColorWhite);
+    pd->graphics->drawEllipse(cx - 9, lidY - 3, 18, 8, 2, 0, 360, kColorBlack);
+    // handles poke out from under the lid
+    GFX_LINE(xL - 3, lidY + 4, xL - 3, lidY + 9, 2, kColorBlack);
+    GFX_LINE(xR + 2, lidY + 4, xR + 2, lidY + 9, 2, kColorBlack);
+    // body, slightly tapered toward the top
+    pd->graphics->fillTriangle(xL - 1, yB, xL + 1, lidY + 2, xR - 1, lidY + 2,
+                               kColorWhite);
+    pd->graphics->fillTriangle(xL - 1, yB, xR - 1, lidY + 2, xR + 1, yB,
+                               kColorWhite);
+    GFX_LINE(xL + 1, lidY + 2, xL - 1, yB, 2, kColorBlack);
+    GFX_LINE(xR - 1, lidY + 2, xR + 1, yB, 2, kColorBlack);
+    GFX_LINE(xL - 1, yB, xR + 1, yB, 2, kColorBlack);
+    // shaded side + belly bands
+    pd->graphics->fillTriangle(cx + 3, lidY + 4, xR - 2, lidY + 4, xR - 1,
+                               yB - 2, (LCDColor)TH_PAT_25);
+    GFX_LINE(xL, yB - 6, xR, yB - 6, 1, kColorBlack);
+    GFX_LINE(xL + 1, lidY + 8, xR - 1, lidY + 8, 1, kColorBlack);
 }
 
 static void render_food(uint8_t foodId, int cx, int baseY,
@@ -579,6 +670,13 @@ static void shop_fence(int x0, int x1, int baseY) {
     }
 }
 
+// A little signpost planted by the pasture, its arrow plank pointing at the
+// herd row — same carved-wood language as the title menu's signposts.
+static void shop_herd_sign(void) {
+    GFX_FILL(376, 150, 6, 44, kColorBlack);                      // post
+    th_sign_plank(286, 396, 158, "YOUR HERD", false, true);
+}
+
 // Food-stall counter — a plank table the two shop foods stand on.
 static void shop_table(int x0, int x1, int topY) {
     GFX_FILL(x0 + 6, topY + 5, 4, 19, kColorBlack);             // legs
@@ -606,7 +704,7 @@ void render_shop_screen(void)
     shop_awning(shopColX[0] - 30, shopColX[2] + 30, 22, 40, shopFeet);
     shop_table(foodX[0] - 26, foodX[1] + 26, shopFeet - 3);
     shop_fence(colX[0] - 26, colX[TEAM_SIZE - 1] + 30, teamFeet);
-    th_chip(344, teamFeet - 30, "YOUR HERD", false);
+    shop_herd_sign();
 
     // --- Pasture turf strips under the live rows.
     th_fill(shopColX[0] - 26, shopFeet, shopColX[2] - shopColX[0] + 52, 11, TH_PAT_12);
@@ -756,10 +854,12 @@ void render_shop_screen(void)
         gw += (tw - gw) * 0.45f;
         bool onActions = cc >= MAX_SHOP_PETS + MAX_SHOP_FOOD + TEAM_SIZE;
         if (game.cursorShown && !onActions) {
+            // flat ground-perspective ring around the feet — tall enough to
+            // read, low enough that it never cuts across the sprite's body
             int pulse = (int)(sinf((float)game.frameCount * 0.22f) * 2.0f);
             int rw = (int)gw + pulse * 2;
-            pd->graphics->drawEllipse((int)gx - rw / 2, (int)gy - 10 - pulse / 2,
-                                      rw, 18 + pulse, 2, 0, 360, kColorBlack);
+            pd->graphics->drawEllipse((int)gx - rw / 2, (int)gy - 8 - pulse / 2,
+                                      rw, 13 + pulse, 2, 0, 360, kColorBlack);
         }
     }
 
@@ -918,31 +1018,55 @@ static BattleEvent* battle_cur_event(float* tOut) {
 }
 
 #define BATTLE_FEET   162
-#define BATTLE_STEP   50
-#define BATTLE_SCALE  1.4f
 #define BATTLE_CX     (SCREEN_W / 2)
 
-// Eased on-screen X per unit, so the line slides forward as units fall.
-// Sentinel -1 means "snap on next frame" — set on battle start and after a
-// FAINT so re-occupied slots don't drift from a stale off-screen flyoff x.
+// Depth-staggered rest layout: the queue recedes up the pasture and shrinks
+// with distance, so all five ranks per side stay on the 400px screen — a
+// snipe at the back rank lands on a pet you can actually see. Rank 0 is the
+// frontline; it keeps the clear centre gap so the clash lunge reads.
+static const int   RANK_XOFF[TEAM_SIZE]  = { 46, 92, 130, 158, 180 };
+static const int   RANK_FEET[TEAM_SIZE]  = { 162, 159, 153, 147, 142 };
+static const float RANK_SCALE[TEAM_SIZE] = { 1.40f, 1.28f, 1.15f, 1.03f,
+                                             0.92f };
+
+// Eased on-screen X / feet-Y / scale per unit, so a survivor slides forward
+// AND grows as it advances toward the frontline. Sentinel -1 means "snap on
+// next frame" — set on battle start and after a FAINT so re-occupied slots
+// don't drift from a stale off-screen flyoff x.
 static float g_unitX[2][TEAM_SIZE];
+static float g_unitY[2][TEAM_SIZE];
+static float g_unitS[2][TEAM_SIZE];
 
 void render_battle_reset_positions(void) {
     for (int s = 0; s < 2; s++)
-        for (int i = 0; i < TEAM_SIZE; i++)
+        for (int i = 0; i < TEAM_SIZE; i++) {
             g_unitX[s][i] = -1.0f;
+            g_unitY[s][i] = -1.0f;
+            g_unitS[s][i] = -1.0f;
+        }
 }
 
 void render_battle_reset_slot_position(int side, int slot) {
     if (side < 0 || side >= 2 || slot < 0 || slot >= TEAM_SIZE) return;
     g_unitX[side][slot] = -1.0f;
+    g_unitY[side][slot] = -1.0f;
+    g_unitS[side][slot] = -1.0f;
 }
 
-// Rest position for a unit at a given rank (0 = frontline). The frontline
-// units rest with a clear gap so the clash lunge across it reads.
+// Rest position for a unit at a given rank (0 = frontline).
 static int unit_target_x(int side, int rank) {
-    return (side == 0) ? BATTLE_CX - 46 - rank * BATTLE_STEP
-                       : BATTLE_CX + 46 + rank * BATTLE_STEP;
+    if (rank >= TEAM_SIZE) rank = TEAM_SIZE - 1;
+    return (side == 0) ? BATTLE_CX - RANK_XOFF[rank]
+                       : BATTLE_CX + RANK_XOFF[rank];
+}
+
+// Rank a slot currently holds: count the live pets in front of it.
+static int battle_slot_rank(int side, int slot) {
+    int rank = 0;
+    for (int i = TEAM_SIZE - 1; i > slot; i--)
+        if (game.battle.teams[side].slots[i].id != EMPTY_PET) rank++;
+    if (rank >= TEAM_SIZE) rank = TEAM_SIZE - 1;
+    return rank;
 }
 
 // On-screen X for a unit, robust against the -1 "needs snap" sentinel that
@@ -957,10 +1081,25 @@ static int battle_slot_x(int side, int slot) {
     if (side < 0 || side >= 2 || slot < 0 || slot >= TEAM_SIZE) return BATTLE_CX;
     float x = g_unitX[side][slot];
     if (x >= 0.0f && x < 2000.0f) return (int)x;
-    int rank = 0;
-    for (int i = TEAM_SIZE - 1; i > slot; i--)
-        if (game.battle.teams[side].slots[i].id != EMPTY_PET) rank++;
-    return unit_target_x(side, rank);
+    return unit_target_x(side, battle_slot_rank(side, slot));
+}
+
+// Eased feet-line Y for a unit, same sentinel fallback as battle_slot_x.
+static int battle_slot_feet(int side, int slot) {
+    if (side < 0 || side >= 2 || slot < 0 || slot >= TEAM_SIZE)
+        return BATTLE_FEET;
+    float y = g_unitY[side][slot];
+    if (y >= 0.0f) return (int)y;
+    return RANK_FEET[battle_slot_rank(side, slot)];
+}
+
+// Eased sprite scale for a unit, same sentinel fallback as battle_slot_x.
+static float battle_slot_scale(int side, int slot) {
+    if (side < 0 || side >= 2 || slot < 0 || slot >= TEAM_SIZE)
+        return RANK_SCALE[0];
+    float s = g_unitS[side][slot];
+    if (s > 0.0f) return s;
+    return RANK_SCALE[battle_slot_rank(side, slot)];
 }
 
 // A floating number with a white halo, rising as t advances.
@@ -1096,7 +1235,7 @@ static int event_unit_dx(BattleEvent* e, float t, int side, int slot) {
 // KO launch — fling the unit off-screen with a hard spin and a scale punch.
 // Ease-out so it bolts at the moment of impact instead of easing in.
 static void draw_unit_flyoff(PetSlot* p, int side, int cx0, int feetY,
-                             int spr, float flyT) {
+                             int spr, float baseSc, float flyT) {
     if (flyT < 0.0f) flyT = 0.0f;
     if (flyT > 1.0f) flyT = 1.0f;
     float eo = 1.0f - (1.0f - flyT) * (1.0f - flyT);
@@ -1105,17 +1244,19 @@ static void draw_unit_flyoff(PetSlot* p, int side, int cx0, int feetY,
     int cyK = (feetY - spr / 2) - (int)(sinf(flyT * PI_F) * 150.0f)
                                 + (int)(eo * 60.0f);
     float deg = eo * 820.0f * (float)backDir;
-    float sc  = BATTLE_SCALE *
+    float sc  = baseSc *
                 (1.0f + 0.45f * (1.0f - flyT) * (1.0f - flyT) - 0.32f * flyT);
     draw_creature_xform(p->id, cxK, cyK, sc, deg, side == 1);
 }
 
 // Draw a single battle unit with clash / faint / hit animation.
-static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float fx) {
+static void battle_draw_unit(BattleEvent* e, float t, int side, int slot,
+                             float fx, float fy, float fs) {
     PetSlot* p = &game.battle.teams[side].slots[slot];
 
-    int spr   = (int)(32 * BATTLE_SCALE);
+    int spr   = (int)(32.0f * fs);
     int restX = (int)fx;
+    int feetY = (int)fy;
 
     // Ability KO — a faint not folded into a clash flies off on its own window.
     if (e && e->kind == BEV_FAINT && e->side == side && e->slot == slot) {
@@ -1126,10 +1267,10 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
         int key = (int)game.battlePlayhead;
         if (lastFaintBurst != key) {
             int dir = (side == 0) ? -1 : 1;   // matches draw_unit_flyoff backDir
-            spawn_debris(restX, BATTLE_FEET - spr / 2, dir);
+            spawn_debris(restX, feetY - spr / 2, dir);
             lastFaintBurst = key;
         }
-        draw_unit_flyoff(p, side, restX, BATTLE_FEET, spr, t);
+        draw_unit_flyoff(p, side, restX, feetY, spr, fs, t);
         return;
     }
 
@@ -1140,10 +1281,10 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
         uint8_t newPetId = e->data;
         int newAtk = e->value & 0xFF;
         int newHp  = (e->value >> 8) & 0xFF;
-        float sc = BATTLE_SCALE * (0.55f + 0.45f * t);
+        float sc = fs * (0.55f + 0.45f * t);
         int hover = -(int)(sinf(t * PI_F) * 4.0f);
         render_unit(newPetId, 1, (int16_t)newAtk, (int16_t)newHp, EMPTY_FOOD,
-                    restX, BATTLE_FEET + hover, sc, false, false, side == 1);
+                    restX, feetY + hover, sc, false, false, side == 1);
         // Rising "materialize" wisps instead of an expanding star-ring: short
         // vertical strokes climbing past the forming unit, staggered so they
         // ripple upward — reads as 'emerging from the ground', not a burst.
@@ -1151,7 +1292,7 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
             int wx = restX - 14 + a * 7;
             float ph = t * 1.25f - (float)a * 0.12f;     // staggered start
             if (ph <= 0.0f || ph >= 1.0f) continue;
-            int wy = (BATTLE_FEET + hover) - (int)(ph * 40.0f);
+            int wy = (feetY + hover) - (int)(ph * 40.0f);
             int len = 3 + (a & 1);
             GFX_LINE(wx, wy, wx, wy - len, 2, kColorBlack);
         }
@@ -1170,14 +1311,14 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
     if (!selfFaintEv && slot_in_ghost_phase(side, slot)) {
         int bob = (int)(sinf((float)game.frameCount * 0.18f) * 2.0f);
         int gx = restX;
-        int gy = BATTLE_FEET + bob;
+        int gy = feetY + bob;
         // Frame-driven so the flicker rate stays consistent at every
         // crank speed (1×..8×). 6 frames normal / 2 frames inverted ≈
         // 3.75 Hz strobe — readable, not seizure-inducing.
         bool invert = ((int)game.frameCount & 7) >= 6;
         if (invert) pd->graphics->setDrawMode(kDrawModeInverted);
         draw_creature_xform(p->id, gx, gy - spr / 2,
-                            BATTLE_SCALE, 0.0f, side == 1);
+                            fs, 0.0f, side == 1);
         pd->graphics->setDrawMode(kDrawModeCopy);
         // Rising wisps above the head, counter-phase to the body flicker
         // so something is always moving — sells "passing spirit".
@@ -1209,7 +1350,7 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
             int dir = (side == 0) ? 1 : -1;
             float flyT = (t - contactT) / (1.0f - contactT);
             draw_unit_flyoff(p, side, restX + dir * 26,
-                             BATTLE_FEET, spr, flyT);
+                             feetY, spr, fs, flyT);
             return;
         }
     }
@@ -1222,7 +1363,7 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
     }
 
     render_unit(p->id, p->level, p->atk, p->hp, p->food,
-                restX + dx, BATTLE_FEET + dy, BATTLE_SCALE,
+                restX + dx, feetY + dy, fs,
                 false, false, side == 1);
 
     // Phase 3.3: Stat-number flash on BUFF. Strobes an inverted disc over
@@ -1233,7 +1374,7 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot, float 
         int dh = (e->value >> 8) & 0xFF;
         int half = spr / 2;
         int bo = half - 11;
-        int by = BATTLE_FEET + dy - 7;
+        int by = feetY + dy - 7;
         int bx = restX + dx;
         bool on = ((int)(t * 22.0f) & 1) == 0;
         if (on) {
@@ -1340,16 +1481,17 @@ static void projectiles_spawn_barrage(int abilityIdx) {
     BattleEvent* a = &game.battleLog[abilityIdx];
     int srcSide = a->side;
     int srcSlot = a->slot;
-    int spr = (int)(32 * BATTLE_SCALE);
     int sx = battle_slot_x(srcSide, srcSlot);
-    int sy = BATTLE_FEET - spr / 2;
+    int sy = battle_slot_feet(srcSide, srcSlot)
+             - (int)(32.0f * battle_slot_scale(srcSide, srcSlot)) / 2;
     for (int i = abilityIdx + 1; i < game.battleLogLen; i++) {
         BattleEvent* e = &game.battleLog[i];
         if (e->kind == BEV_DAMAGE) {
             int tgtSide = e->side, tgtSlot = e->slot;
             if (tgtSlot >= TEAM_SIZE) continue;
             int ex = battle_slot_x(tgtSide, tgtSlot);
-            int ey = BATTLE_FEET - spr / 2;
+            int ey = battle_slot_feet(tgtSide, tgtSlot)
+                     - (int)(32.0f * battle_slot_scale(tgtSide, tgtSlot)) / 2;
             spawn_projectile(sx, sy, ex, ey,
                              (uint8_t)tgtSide, (uint8_t)tgtSlot,
                              (uint8_t)(e->value & 0xFF));
@@ -1424,7 +1566,9 @@ static void projectiles_step_and_draw(void) {
             snprintf(buf, sizeof(buf), "-%d", (int)p->damage);
             // Anchor above the target sprite's head so the rising number
             // doesn't overlap the badges; matches the CLASH-popup height.
-            int popTop = p->ey - (int)(32 * BATTLE_SCALE) / 2 - 8;
+            int popTop = p->ey - (int)(32.0f * battle_slot_scale(p->side,
+                                                                 p->slot)) / 2
+                         - 8;
             battle_popup(p->ex, popTop, buf, tt);
         }
     }
@@ -1463,9 +1607,27 @@ void render_battle_screen(void)
     // scoreboard, and a trampled arena ring on the pasture where the two
     // herds meet. Drawn before units, outside the shake offset.
     th_pennant_garland(-8, SCREEN_W + 8, TOPBAR_H + 2, 7);
-    pd->graphics->drawEllipse(BATTLE_CX - 160, BATTLE_FEET - 20, 320, 34,
+    pd->graphics->drawEllipse(BATTLE_CX - 185, BATTLE_FEET - 20, 370, 34,
                               2, 0, 360, (LCDColor)TH_PAT_50);
-    th_fill(BATTLE_CX - 130, BATTLE_FEET - 12, 260, 18, TH_PAT_12);
+    th_fill(BATTLE_CX - 150, BATTLE_FEET - 12, 300, 18, TH_PAT_12);
+    th_fill(BATTLE_CX - 70, BATTLE_FEET - 8, 140, 10, TH_PAT_25);
+
+    // Pasture texture: deterministic hash-scattered grass tufts and dirt
+    // specks so the field reads as turf instead of blank paper. Static
+    // (position-hashed, not frame-hashed) so nothing shimmers.
+    for (int i = 0; i < 10; i++) {
+        int gx = (i * 83 + 21) % SCREEN_W;
+        int gy = 96 + ((i * 47 + 9) % 96);
+        if (gy > BATTLE_FEET + 24) gy = BATTLE_FEET + 24;
+        GFX_LINE(gx - 3, gy, gx - 1, gy - 4, 1, kColorBlack);
+        GFX_LINE(gx,     gy, gx,     gy - 5, 1, kColorBlack);
+        GFX_LINE(gx + 3, gy, gx + 1, gy - 3, 1, kColorBlack);
+    }
+    for (int i = 0; i < 14; i++) {
+        int dx = (i * 131 + 57) % SCREEN_W;
+        int dy = 100 + ((i * 61 + 31) % 92);
+        GFX_FILL(dx, dy, 2, 1, kColorBlack);
+    }
 
     // Team name plates — player on white, challenger on black, anchored just
     // under the garland. Same draw in pre-battle and battle so nothing pops.
@@ -1518,12 +1680,20 @@ void render_battle_screen(void)
                 }
                 if (!willRespawn && !slot_in_ghost_phase(side, i)) continue;
             }
-            float tgt = (float)unit_target_x(side, rank);
+            int r = (rank >= TEAM_SIZE) ? TEAM_SIZE - 1 : rank;
+            float tgt  = (float)unit_target_x(side, r);
+            float tgtY = (float)RANK_FEET[r];
+            float tgtS = RANK_SCALE[r];
             float cur = g_unitX[side][i];
-            if (cur < 1.0f || cur > 2000.0f || fabsf(tgt - cur) > 150.0f)
+            if (cur < 1.0f || cur > 2000.0f || fabsf(tgt - cur) > 150.0f) {
                 g_unitX[side][i] = tgt;                  // snap (battle start)
-            else
+                g_unitY[side][i] = tgtY;
+                g_unitS[side][i] = tgtS;
+            } else {
                 g_unitX[side][i] = cur + (tgt - cur) * 0.30f;
+                g_unitY[side][i] += (tgtY - g_unitY[side][i]) * 0.30f;
+                g_unitS[side][i] += (tgtS - g_unitS[side][i]) * 0.30f;
+            }
             rank++;
         }
     }
@@ -1542,10 +1712,13 @@ void render_battle_screen(void)
     pd->graphics->setDrawOffset(shx, shy);
 
     // --- draw units, back rows first so the frontline overlaps ---
+    // (low slot index = back rank, so ascending order is back-to-front)
     for (int side = 0; side < 2; side++)
         for (int i = 0; i < TEAM_SIZE; i++)
             if (game.battle.teams[side].slots[i].id != EMPTY_PET)
-                battle_draw_unit(e, t, side, i, g_unitX[side][i]);
+                battle_draw_unit(e, t, side, i, g_unitX[side][i],
+                                 battle_slot_feet(side, i),
+                                 battle_slot_scale(side, i));
 
     // --- clash impact: spawn debris off both combatants ONCE at contact ---
     // The dying pet (if any) flies off via clash_kills_with_flyoff; the
@@ -1571,7 +1744,8 @@ void render_battle_screen(void)
     // CLASH numbers ride the sprite's per-event dx so they don't get left
     // at the rest position. ABILITY-driven damages are popped by their
     // projectile (see projectiles_step_and_draw). BUFF popups stay here.
-    int popTop = BATTLE_FEET - (int)(32 * BATTLE_SCALE) - 14;
+    // CLASH popups always concern the two frontline pets (rank 0).
+    int popTop = RANK_FEET[0] - (int)(32.0f * RANK_SCALE[0]) - 14;
     if (e && t > 0.42f && e->kind == BEV_CLASH) {
         int pDmg = e->value & 0xFF, eDmg = (e->value >> 8) & 0xFF;
         char s[8];
