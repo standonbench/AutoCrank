@@ -9,7 +9,7 @@ static void pet_dog_summon      (BattleState* bs, uint8_t side, uint8_t slot, Tr
 static void pet_frog_eot        (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_bee_sob         (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_cricket_faint   (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
-static void pet_cow_buy         (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
+static void pet_cow_sell        (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 
 static void pet_sheep_faint     (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_hedgehog_faint  (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
@@ -19,7 +19,7 @@ static void pet_snake_friendatk (BattleState* bs, uint8_t side, uint8_t slot, Tr
 static void pet_spider_faint    (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 
 static void pet_croc_sob        (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
-static void pet_boar_beforeatk  (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
+static void pet_boar_clash      (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_dragon_buy      (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_tiger_sob       (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_parrot_sob      (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
@@ -50,7 +50,7 @@ static void food_milk_apply         (Team* team, uint8_t targetSlot);
 #define H_EOT       [TRIG_END_OF_TURN]         =
 #define H_SOB       [TRIG_START_OF_BATTLE]     =
 #define H_BUY       [TRIG_BUY]                 =
-#define H_BEFOREATK [TRIG_BEFORE_ATTACK]       =
+#define H_SELL      [TRIG_SELL]                =
 
 // Swiss Alpine roster — Combat des Reines. Abilities unchanged from the
 // original prototype; names + sprites re-themed. spriteId selects the
@@ -87,10 +87,10 @@ const PetDef PETS[PET_COUNT] = {
           "Faint: spawn a 5/5 Rabbit w/ Edelweiss." },
         { H_FAINT  pet_cricket_faint } },
     [5]  = { "Calf",      3, 3, 1,  5,   // cow-0 (brown)
-        { "On own buy: add Milk to the shop.",
-          "+L1, and any T1 buy: gain +1g.",
-          "+L1, and any buy: gain +2g." },
-        { H_BUY    pet_cow_buy } },
+        { "Sell: gain +1g extra.",
+          "Sell: gain +2g extra.",
+          "Sell: gain +3g extra." },
+        { H_SELL   pet_cow_sell } },
     // Tier 2 — working farm animals
     [6]  = { "Sheep",     3, 2, 2,  6,   // sheep
         { "Faint: spawn two 2/2 Haflingers.",
@@ -133,11 +133,11 @@ const PetDef PETS[PET_COUNT] = {
           "Faint: 8 dmg to a random enemy.",
           "Faint: 8 dmg to all enemies." },
         { H_FAINT  pet_whale_faint } },
-    [14] = { "Boar",      6, 6, 3, 14,   // pig (wild pig stand-in)
-        { "Before attack: gain +2/+2.",
-          "Before attack: gain +3/+3.",
-          "Before atk: +4/+4 self, +1 atk friends." },
-        { H_BEFOREATK pet_boar_beforeatk } },
+    [14] = { "Boar",      5, 6, 3, 14,   // pig (wild pig stand-in)
+        { "Each clash: gain +1/+1.",
+          "Each clash: gain +2/+1.",
+          "Each clash: gain +2/+2." },
+        { H_FRDATK pet_boar_clash } },
     [15] = { "Deer",      3, 3, 3, 15,
         { "Battle start: copy left ally's ability.",
           "Battle start: copy left at +1 power.",
@@ -418,50 +418,19 @@ static void pet_cricket_faint(BattleState* bs, uint8_t side, uint8_t slot, Trigg
     }
 }
 
-static void pet_cow_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Calf fires on any buy on our side. Two effects stack by level:
-    //   L1+: on Calf's OWN buy (or combine into self), drop a Milk in shop.
-    //   L2+: on any qualifying-tier buy, rebate gold:
-    //        L2 = any T1 buy → +1g.   L3 = any buy → +2g.
-    // The any-buy rebate at L3 is what keeps Calf alive after max-level
-    // (without it the ability would never fire again post-combine).
-    if (ev->side != side) return;
+static void pet_cow_sell(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Calf is a tempo loan: a solid 3/3 body for the early clashes that pays
+    // its price back when sold later — sell bonus +1g/+2g/+3g on top of the
+    // normal level refund, so an L1 Calf returns 2g of its 3g cost and a
+    // combined Calf turns a profit. Uses the SELL trigger (pushed by
+    // shop_try_sell BEFORE the slot clears, drained while the pet is still
+    // in place). Fires only when the Calf ITSELF is the pet being sold.
+    if (ev->side != side || ev->srcSlot != slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-
-    // L1+ — Milk delivery on own buy. Prefer empty, then unfrozen, else slot 0.
-    if (ev->srcSlot == slot) {
-        bool placed = false;
-        for (int i = 0; i < MAX_SHOP_FOOD; i++) {
-            if (game.shop.foods[i] == EMPTY_FOOD) {
-                game.shop.foods[i] = 5;
-                placed = true;
-                break;
-            }
-        }
-        if (!placed) {
-            for (int i = 0; i < MAX_SHOP_FOOD; i++) {
-                if (!(game.shop.frozenFoods & (1 << i))) {
-                    game.shop.foods[i] = 5;
-                    placed = true;
-                    break;
-                }
-            }
-            if (!placed) game.shop.foods[0] = 5;
-        }
-    }
-
-    // L2+ — gold rebate on qualifying buys.
-    if (lvl >= 2) {
-        int boughtTier = (int)ev->data;
-        int maxTier, rebate;
-        if (lvl >= 3) { maxTier = 3; rebate = 2; }
-        else          { maxTier = 1; rebate = 1; }
-        if (boughtTier <= maxTier) {
-            game.shop.gold = (int16_t)mini(game.shop.gold + rebate, 99);
-            game.lastGoldDelta = (int8_t)rebate;
-            game.goldFxFrames  = 12;
-        }
-    }
+    int bonus = lvl;                                   // +1g / +2g / +3g
+    game.shop.gold = (int16_t)mini(game.shop.gold + bonus, 99);
+    game.lastGoldDelta = (int8_t)bonus;
+    game.goldFxFrames  = 12;
 }
 
 // ---------------------------------------------------------------------------
@@ -617,26 +586,23 @@ static void pet_croc_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEve
     }
 }
 
-static void pet_boar_beforeatk(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires only when WE are the one attacking.
-    // L1: +2/+2 self. L2: +3/+3 self. L3: +4/+4 self + +1 atk to all friends.
-    if (ev->side != side || ev->srcSlot != slot) return;
+static void pet_boar_clash(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Boar feeds on the melee: EVERY clash on its side hardens it — its own
+    // attacks included (unlike Alligator there is deliberately no srcSlot
+    // filter), so it grows from the back rank and arrives at the front as a
+    // monster. The attrition pillar that walls the pre-combat snipe meta:
+    // snipes can kill it early, but every clash they don't end feeds it.
+    // L1: +1/+1 per clash. L2: +2/+1. L3: +2/+2.
+    if (ev->side != side) return;
+    if (bs->teams[side].slots[slot].hp <= 0) return;   // corpses don't grow
     int lvl = (int)bs->teams[side].slots[slot].level;
-    int self, friendAtk;
+    int a, h;
     switch (lvl) {
-        case 1:  self = 2; friendAtk = 0; break;
-        case 2:  self = 3; friendAtk = 0; break;
-        default: self = 4; friendAtk = 1; break;
+        case 1:  a = 1; h = 1; break;
+        case 2:  a = 2; h = 1; break;
+        default: a = 2; h = 2; break;
     }
-    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(self, self), 0);
-    if (friendAtk > 0) {
-        for (int i = 0; i < TEAM_SIZE; i++) {
-            if (i == slot) continue;
-            if (bs->teams[side].slots[i].id == EMPTY_PET) continue;
-            battle_emit(bs, BEV_BUFF, side, (uint8_t)i,
-                        encode_pair(friendAtk, 0), 0);
-        }
-    }
+    battle_emit(bs, BEV_BUFF, side, slot, encode_pair(a, h), 0);
 }
 
 static void pet_dragon_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {

@@ -128,11 +128,12 @@ void selftest_run(void) {
         check("Ox friend-faint buff", run_battle(p, 2, e, 1) == 0);
     }
 
-    // T8: Boar gains +2/+2 before it attacks. Boar(0 atk) only wins if buffed.
+    // T8: Boar gains +1/+1 from every clash (its own included). A 0-atk Boar
+    // can only beat the Pup by growing — no growth means it never deals dmg.
     {
         PetSlot p[] = { mk(14, 0, 4) };
-        PetSlot e[] = { mk(0, 1, 3) };
-        check("Boar before-attack buff", run_battle(p, 1, e, 1) == 0);
+        PetSlot e[] = { mk(1, 1, 3) };               // Pup: no abilities
+        check("Boar clash-growth", run_battle(p, 1, e, 1) == 0);
     }
 
     // T9: Snake deals 5 to a random enemy when a friend attacks.
@@ -416,42 +417,41 @@ void selftest_run(void) {
               game.battle.teams[0].slots[0].food == 1);
     }
 
-    // T31: Calf L2 rebates +1g on the combine-buy that takes it to L2. Calf's
-    // BUY handler only fires when Calf itself is the bought pet (srcSlot ==
-    // slot), so triggering a rebate requires buying/combining a Calf.
+    // T31: Calf sell bonus — an L1 Calf pays the 1g refund + 1g bonus, and
+    // the bonus proves the SELL handler ran while the pet still occupied
+    // its slot (shop_try_sell drains before clearing).
     {
         clear_team(&game.player);
         game.player.slots[0] = mk(5, 3, 3);          // L1 Calf
-        game.player.slots[0].xp = LEVEL_2_XP - 1;    // 1 xp; next combine -> L2
         memset(&game.shop, 0, sizeof(Shop));
-        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
-        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
-        game.shop.pets[0] = 5;                       // Calf in shop
-        game.shop.gold = 10;
-        int before = game.shop.gold;
-        shop_try_buy_pet(0, 0);                      // combine -> level 2
-        check("Calf L2: +1g rebate on combine",
-              game.shop.gold == before - PET_COST + 1 &&
-              game.player.slots[0].level == 2);
+        game.shop.gold = 0;
+        shop_try_sell(0);
+        check("Calf L1: sell pays 1g + 1g bonus",
+              game.shop.gold == 2 &&
+              game.player.slots[0].id == EMPTY_PET);
     }
 
-    // T32: Calf L3 rebates +2g on the combine that takes it from L2 to L3.
+    // T32: Calf L3 sell = 3g refund + 3g bonus = 6g (the tempo loan turns
+    // a profit once combined).
     {
         clear_team(&game.player);
-        game.player.slots[0] = mkL(5, 5, 5, 2);      // L2 Calf 5/5
-        // To reach L3: need cumulative xp = LEVEL_2_XP + LEVEL_3_XP = 5.
-        // Calf already at L2 with xp set so next combine hits 5.
-        game.player.slots[0].xp = LEVEL_2_XP + LEVEL_3_XP - 1;
+        game.player.slots[0] = mkL(5, 5, 5, 3);      // L3 Calf
         memset(&game.shop, 0, sizeof(Shop));
-        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
-        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
-        game.shop.pets[0] = 5;
-        game.shop.gold = 10;
-        int before = game.shop.gold;
-        shop_try_buy_pet(0, 0);                      // combine -> level 3
-        check("Calf L3: +2g rebate on combine",
-              game.shop.gold == before - PET_COST + 2 &&
-              game.player.slots[0].level == 3);
+        game.shop.gold = 0;
+        shop_try_sell(0);
+        check("Calf L3: sell pays 3g + 3g bonus", game.shop.gold == 6);
+    }
+
+    // T32b: the bonus is self-only — selling a DIFFERENT pet with a Calf on
+    // the team pays only the normal refund.
+    {
+        clear_team(&game.player);
+        game.player.slots[0] = mk(5, 3, 3);          // Calf stays put
+        game.player.slots[1] = mk(0, 2, 2);          // Marmot gets sold
+        memset(&game.shop, 0, sizeof(Shop));
+        game.shop.gold = 0;
+        shop_try_sell(1);
+        check("Calf: no bonus on ally sell", game.shop.gold == 1);
     }
 
     // T33: Sheep L3 spawns two 6/6 Haflingers.
@@ -527,13 +527,16 @@ void selftest_run(void) {
         check("Highland L3: AoE hits all 3 enemies", n == 3);
     }
 
-    // T38: Boar L3 grants its OTHER friends +1 atk on each of its attacks.
+    // T38: Boar L3 grows +2/+2 per clash. 0-atk Boar vs a 0-atk 7-hp Pup:
+    // clashes deal 0/2/4/6 → dead after clash 4, so Boar ends at exactly
+    // 8 atk (4 clashes × +2). At L1 (+1/+1) it would end at 5 — the number
+    // pins the L3 rate, not just "it grew".
     {
-        PetSlot p[] = { mk(0, 1, 100), mkL(14, 6, 6, 3) };  // Marmot + L3 Boar
-        PetSlot e[] = { mk(0, 0, 100) };                      // soak
-        run_battle(p, 2, e, 1);
-        check("Boar L3: friend gains +1 atk per Boar atk",
-              game.battle.teams[0].slots[0].atk >= 2);
+        PetSlot p[] = { mkL(14, 0, 4, 3) };
+        PetSlot e[] = { mk(1, 0, 7) };
+        int r = run_battle(p, 1, e, 1);
+        check("Boar L3: +2/+2 per clash",
+              r == 0 && game.battle.teams[0].slots[0].atk == 8);
     }
 
     // T39: Ibex L3 copies BOTH neighbours' SOB. Bernard's handler reads its

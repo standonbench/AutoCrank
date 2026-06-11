@@ -153,12 +153,13 @@ bool shop_try_sell(uint8_t teamSlot) {
     if (refund < 1) refund = 1;
     game.shop.gold += refund;
     gold_fx(refund);
-    // Fire SELL trigger before clearing
+    // Fire AND drain the SELL trigger while the pet still occupies its slot,
+    // so a sell-payoff handler (Calf) can read its own level. Clear after.
     trig_push(TRIG_SELL, 0, teamSlot, teamSlot, p->id);
+    trig_shop_drain();
     p->id = EMPTY_PET;
     p->level = 1; p->xp = 0; p->atk = 0; p->hp = 0;
     p->food = EMPTY_FOOD; p->flags = 0;
-    trig_shop_drain();
     sfx_sell();
     {
         char buf[8];
