@@ -165,18 +165,22 @@ bool battle_resolve_faints(BattleState* bs)
         // already replaced the pet. Detection: id-match alone isn't enough,
         // because Hopper→Hopper spawns reuse the same id; require hp <= 0 to
         // confirm the slot still holds the dying pet (a spawn would have set
-        // hp > 0). If the dying pet held Edelweiss (food id 1), a 1/1 Bee
-        // Buddy hatches into the freshly-vacated slot.
+        // hp > 0). If the dying pet held Edelweiss (food id 1), a Bee Buddy
+        // hatches into the freshly-vacated slot — its body scales with the
+        // HOLDER's level (2/2 at L1 up to 4/4 at L3), so the flower stays a
+        // live pick past the early turns. Capture the level before BEV_FAINT
+        // clears the slot.
         for (int side = 0; side < 2; side++) {
             for (int s = 0; s < TEAM_SIZE; s++) {
                 PetSlot* p = &bs->teams[side].slots[s];
                 if (dead[side][s] != EMPTY_PET && p->id == dead[side][s] &&
                     p->hp <= 0) {
                     bool hadHoney = (p->food == 1);
+                    int beeStat = 1 + (int)p->level;
+                    if (beeStat > 4) beeStat = 4;
                     battle_emit(bs, BEV_FAINT, (uint8_t)side, (uint8_t)s, 0, dead[side][s]);
                     if (hadHoney) {
-                        // Edelweiss hatches a 2/2 Bee Buddy in the vacated slot.
-                        int16_t bp = (int16_t)(2 | (2 << 8));
+                        int16_t bp = (int16_t)(beeStat | (beeStat << 8));
                         battle_emit(bs, BEV_SPAWN, (uint8_t)side, (uint8_t)s,
                                     bp, 3 /* Bee id */);
                     }

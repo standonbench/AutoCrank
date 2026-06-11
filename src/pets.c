@@ -62,19 +62,19 @@ static void food_milk_apply         (Team* team, uint8_t targetSlot);
 const PetDef PETS[PET_COUNT] = {
     // Tier 1 — small alpine & young farm animals
     [0]  = { "Squirrel",  2, 2, 1,  0,
-        { "Faint: 2 dmg to a random enemy.",
+        { "Faint: 3 dmg to a random enemy.",
           "Faint: 4 dmg to a random enemy.",
-          "Faint: 4 dmg to two random enemies." },
+          "Faint: 4 dmg to two different enemies." },
         { H_FAINT  pet_mouse_faint } },
     [1]  = { "Pup",       3, 2, 1,  1,
         { "Ally summoned: gain +1/+1.",
           "Ally summoned: gain +2/+2.",
           "Ally summoned: +2/+2 self, +1/+1 to it." },
         { H_SUMMON pet_dog_summon } },
-    [2]  = { "Hen",       1, 3, 1,  2,   // chicken
+    [2]  = { "Hen",       2, 3, 1,  2,   // chicken
         { "End of turn: +1/+1 to ally on left.",
-          "End of turn: +2/+1 to ally on left.",
-          "End of turn: +2/+1 to both neighbors." },
+          "End of turn: +2/+2 to ally on left.",
+          "End of turn: +2/+2 to both neighbors." },
         { H_EOT    pet_frog_eot } },
     [3]  = { "Hedgehog",  2, 1, 1,  3,
         { "Battle start: +1/+1 to all friends.",
@@ -83,8 +83,8 @@ const PetDef PETS[PET_COUNT] = {
         { H_SOB    pet_bee_sob } },
     [4]  = { "Rabbit",    2, 2, 1,  4,
         { "Faint: spawn a 2/2 Rabbit here.",
-          "Faint: spawn a 3/3 Rabbit here.",
-          "Faint: spawn a 4/4 Rabbit w/ Edelweiss." },
+          "Faint: spawn a 4/4 Rabbit here.",
+          "Faint: spawn a 5/5 Rabbit w/ Edelweiss." },
         { H_FAINT  pet_cricket_faint } },
     [5]  = { "Calf",      3, 3, 1,  5,   // cow-0 (brown)
         { "On own buy: add Milk to the shop.",
@@ -107,9 +107,9 @@ const PetDef PETS[PET_COUNT] = {
           "Ally summoned: give it +3/+2.",
           "Ally summoned: give it +3/+3." },
         { H_SUMMON pet_horse_summon } },
-    [9]  = { "Donkey",    2, 4, 2,  9,
+    [9]  = { "Donkey",    2, 5, 2,  9,
         { "Ally faints: gain +2 atk.",
-          "Ally faints: gain +3 atk.",
+          "Ally faints: gain +2/+1.",
           "Ally faints: +3/+1 and gain Cowbell." },
         { H_FAINTFRD pet_ox_friendfaint } },
     [10] = { "Alligator", 3, 3, 2, 10,
@@ -120,7 +120,7 @@ const PetDef PETS[PET_COUNT] = {
     [11] = { "Duck",      3, 3, 2, 11,
         { "Faint: spawn a random T1 (3/3).",
           "Faint: spawn a random T1 (5/5).",
-          "Faint: spawn a random T1/T2 (5/5)." },
+          "Faint: spawn a random T1/T2 (6/6)." },
         { H_FAINT  pet_spider_faint } },
     // Tier 3 — champions of the alp
     [12] = { "Alpaca",    5, 4, 3, 12,
@@ -138,19 +138,19 @@ const PetDef PETS[PET_COUNT] = {
           "Before attack: gain +3/+3.",
           "Before atk: +4/+4 self, +1 atk friends." },
         { H_BEFOREATK pet_boar_beforeatk } },
-    [15] = { "Deer",      3, 4, 3, 15,
+    [15] = { "Deer",      3, 3, 3, 15,
         { "Battle start: copy left ally's ability.",
           "Battle start: copy left at +1 power.",
           "Battle start: copy both neighbors." },
         { H_SOB    pet_parrot_sob } },
-    [16] = { "Fox",       4, 5, 3, 16,
+    [16] = { "Fox",       3, 4, 3, 16,
         { "Battle start: re-fire right ally.",
           "Battle start: re-fire right ally twice.",
           "Battle start: re-fire right ally twice." },
         { H_SOB    pet_tiger_sob } },
     [17] = { "Bear",      6, 8, 3, 17,
-        { "Buy a T1: +1/+1 to all friends.",
-          "Buy T1/T2: +1/+1 to all friends.",
+        { "Buy T1/T2: +1/+1 to all friends.",
+          "Buy any ally: +1/+1 to all friends.",
           "Buy any ally: +2/+1 to all friends." },
         { H_BUY    pet_dragon_buy } },
 };
@@ -217,12 +217,17 @@ uint8_t pet_roll_for_turn(uint8_t turn) {
 // SAP-style food tiering: T1 foods (turn 1+) are always available; T2 unlocks
 // at turn 3 alongside T2 pets; T3 unlocks at turn 5. shop_refill() filters by
 // game.turn >= unlockTurn.
+// Pricing logic: Milk (3g, random +2/+2) is the benchmark. Hay at 2g is the
+// cheaper targeted alternative (was 3g and strictly dominated). Salt Lick at
+// 2g/+5 is the "summit-day" burst buy before a big battle. Cowbell at 4g is
+// priced as the best-in-slot permanent effect it is. Cheese stays the 1g
+// combo enabler. Edelweiss scales with the HOLDER's level (see battle.c).
 const FoodDef FOODS[FOOD_COUNT] = {
     // name        cost sprite target unlock  desc                                  apply
-    [0] = { "Hay",       3, 0, true,  1, "+1 atk and +1 hp to a friend.",        food_apple_apply },
-    [1] = { "Edelweiss", 3, 1, true,  3, "Held: on faint, spawn a 2/2 Hedgehog.", food_honey_apply },
-    [2] = { "Salt Lick", 3, 2, true,  5, "+4 atk for the next battle.",          food_meatbone_apply },
-    [3] = { "Cowbell",   3, 3, true,  5, "Held: takes 2 less damage.",           food_garlic_apply },
+    [0] = { "Hay",       2, 0, true,  1, "+1 atk and +1 hp to a friend.",        food_apple_apply },
+    [1] = { "Edelweiss", 3, 1, true,  3, "Held: faint spawns a leveled Hedgehog.", food_honey_apply },
+    [2] = { "Salt Lick", 2, 2, true,  5, "+5 atk for the next battle.",          food_meatbone_apply },
+    [3] = { "Cowbell",   4, 3, true,  5, "Held: takes 2 less damage.",           food_garlic_apply },
     [4] = { "Cheese",    1, 4, true,  1, "Faint a friend (synergies fire).",     food_sleepingpill_apply },
     [5] = { "Milk",      3, 5, false, 3, "Random friend gains +2/+2.",           food_milk_apply },
 };
@@ -294,20 +299,30 @@ static void summon_pet_in_slot(BattleState* bs, uint8_t side, uint8_t slot,
 // Tier 1 pet abilities
 // ---------------------------------------------------------------------------
 static void pet_mouse_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires only on our OWN faint. L1: 2 dmg / 1 target. L2: 4 dmg / 1 target.
-    // L3: 4 dmg / 2 random targets (may repeat — random with replacement).
+    // Fires only on our OWN faint. L1: 3 dmg / 1 target. L2: 4 dmg / 1 target.
+    // L3: 4 dmg / 2 DIFFERENT targets — without replacement, so the hits
+    // always spread (the old with-replacement roll double-tapped one pet
+    // ~40% of the time, making L3 feel like a coin flip). With one enemy
+    // left the second hit fizzles.
     if (ev->side != side || ev->srcSlot != slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
     int dmg, targets;
     switch (lvl) {
-        case 1:  dmg = 2; targets = 1; break;
+        case 1:  dmg = 3; targets = 1; break;
         case 2:  dmg = 4; targets = 1; break;
         default: dmg = 4; targets = 2; break;
     }
     int targetSide = side ^ 1;
+    int alive[TEAM_SIZE], nAlive = 0;
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        PetSlot* ep = &bs->teams[targetSide].slots[i];
+        if (ep->id != EMPTY_PET && ep->hp > 0) alive[nAlive++] = i;
+    }
+    if (targets > nAlive) targets = nAlive;
     for (int n = 0; n < targets; n++) {
-        int t = random_alive_slot_side(bs, (uint8_t)targetSide);
-        if (t < 0) return;
+        int k = rng_range(0, nAlive - 1);
+        int t = alive[k];
+        alive[k] = alive[--nAlive];          // draw without replacement
         // ABILITY logs the visual cue (glow at source) FIRST, then DAMAGE
         // applies — so cause-and-effect reads left-to-right at playback.
         battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)t);
@@ -337,15 +352,17 @@ static void pet_dog_summon(BattleState* bs, uint8_t side, uint8_t slot, TriggerE
 }
 
 static void pet_frog_eot(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // L1: +1/+1 left. L2: +2/+1 left. L3: +2/+1 to BOTH neighbors.
+    // L1: +1/+1 left. L2: +2/+2 left. L3: +2/+2 to BOTH neighbors.
+    // The hp at L2+ makes Hen the "raise a carry" engine (vs Pup's
+    // "raise itself") — pure atk drip lost to clash trades.
     (void)ev;
     int lvl = (int)bs->teams[side].slots[slot].level;
     int a, h;
     bool buffRight;
     switch (lvl) {
         case 1:  a = 1; h = 1; buffRight = false; break;
-        case 2:  a = 2; h = 1; buffRight = false; break;
-        default: a = 2; h = 1; buffRight = true;  break;
+        case 2:  a = 2; h = 2; buffRight = false; break;
+        default: a = 2; h = 2; buffRight = true;  break;
     }
     if (slot > 0) {
         int l = (int)slot - 1;
@@ -377,9 +394,10 @@ static void pet_bee_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEven
 }
 
 static void pet_cricket_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // L1: spawn 2/2 Hopper. L2: 3/3. L3: 4/4 holding Edelweiss (Bee on faint).
+    // L1: spawn 2/2 Hopper. L2: 4/4. L3: 5/5 holding Edelweiss (Bee on faint).
     // A real body (not 1/1 chaff) so the respawn matters on its own and feeds
-    // summon/death payoffs (Pup, Haflinger, Donkey, Alligator).
+    // summon/death payoffs (Pup, Haflinger, Donkey, Alligator). L2/L3 keep
+    // pace with the stat curve at the turns those levels actually arrive.
     if (ev->side != side || ev->srcSlot != slot) return;
     // Spawned Zombie Hoppers carry the same faint handler; bail if this is
     // already a spawn so the cascade stops at one zombie per original.
@@ -389,8 +407,8 @@ static void pet_cricket_faint(BattleState* bs, uint8_t side, uint8_t slot, Trigg
     bool withEdelweiss;
     switch (lvl) {
         case 1:  atk = 2; hp = 2; withEdelweiss = false; break;
-        case 2:  atk = 3; hp = 3; withEdelweiss = false; break;
-        default: atk = 4; hp = 4; withEdelweiss = true;  break;
+        case 2:  atk = 4; hp = 4; withEdelweiss = false; break;
+        default: atk = 5; hp = 5; withEdelweiss = true;  break;
     }
     summon_pet_in_slot(bs, side, slot, 4 /*Hopper*/, (int16_t)atk, (int16_t)hp);
     if (withEdelweiss) {
@@ -511,7 +529,9 @@ static void pet_horse_summon(BattleState* bs, uint8_t side, uint8_t slot, Trigge
 
 static void pet_ox_friendfaint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
     // Fires when an ally OTHER THAN US faints.
-    // L1: +2 atk. L2: +3 atk. L3: +3/+1 AND gain Cowbell (bit 0 = -2 dmg taken).
+    // L1: +2 atk. L2: +2/+1. L3: +3/+1 AND gain Cowbell (bit 0 = -2 dmg
+    // taken). The hp from L2 lets the stacks actually get spent — a pure
+    // atk Donkey kept dying before its pile mattered.
     if (ev->side != side) return;
     if (ev->srcSlot == slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
@@ -519,7 +539,7 @@ static void pet_ox_friendfaint(BattleState* bs, uint8_t side, uint8_t slot, Trig
     bool gainCowbell;
     switch (lvl) {
         case 1:  a = 2; h = 0; gainCowbell = false; break;
-        case 2:  a = 3; h = 0; gainCowbell = false; break;
+        case 2:  a = 2; h = 1; gainCowbell = false; break;
         default: a = 3; h = 1; gainCowbell = true;  break;
     }
     battle_emit(bs, BEV_BUFF, side, slot, encode_pair(a, h), 0);
@@ -552,8 +572,10 @@ static void pet_snake_friendatk(BattleState* bs, uint8_t side, uint8_t slot, Tri
 }
 
 static void pet_spider_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Goose: summon a random pet from a level-gated pool.
-    // L1: T1 at 3/3. L2: T1 at 5/5. L3: T1 or T2 at 5/5.
+    // Goose: summon a random pet from a level-gated pool. The lottery body
+    // scales so the L3 gamble isn't strictly worse than Sheep's sure thing —
+    // the spawned pet keeps its own faint chain, which is the fun part.
+    // L1: T1 at 3/3. L2: T1 at 5/5. L3: T1 or T2 at 6/6.
     if (ev->side != side || ev->srcSlot != slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
     int stat;
@@ -561,7 +583,7 @@ static void pet_spider_faint(BattleState* bs, uint8_t side, uint8_t slot, Trigge
     switch (lvl) {
         case 1:  stat = 3; maxTier = 1; break;
         case 2:  stat = 5; maxTier = 1; break;
-        default: stat = 5; maxTier = 2; break;
+        default: stat = 6; maxTier = 2; break;
     }
     uint8_t pid = pet_random_in_tier(maxTier);
     summon_pet_in_slot(bs, side, slot, pid, (int16_t)stat, (int16_t)stat);
@@ -618,15 +640,17 @@ static void pet_boar_beforeatk(BattleState* bs, uint8_t side, uint8_t slot, Trig
 }
 
 static void pet_dragon_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Bull buffs the whole team when a qualifying ally is bought.
-    // L1: T1 buys only, +1/+1. L2: T1 or T2 buys, +1/+1. L3: any buy, +2/+1.
+    // Bull buffs the whole team when a qualifying ally is bought. Gates sit
+    // one step wider than they used to because the tier-weighted shop makes
+    // T1 rare after turn 7 — a "T1 buys only" Bear would silently die there.
+    // L1: T1/T2 buys, +1/+1. L2: any buy, +1/+1. L3: any buy, +2/+1.
     if (ev->side != side) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
     int boughtTier = (int)ev->data;
     int maxTier, buffAtk, buffHp;
     switch (lvl) {
-        case 1:  maxTier = 1; buffAtk = 1; buffHp = 1; break;
-        case 2:  maxTier = 2; buffAtk = 1; buffHp = 1; break;
+        case 1:  maxTier = 2; buffAtk = 1; buffHp = 1; break;
+        case 2:  maxTier = 3; buffAtk = 1; buffHp = 1; break;
         default: maxTier = 3; buffAtk = 2; buffHp = 1; break;
     }
     if (boughtTier > maxTier) return;

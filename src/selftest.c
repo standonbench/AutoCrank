@@ -7,7 +7,7 @@
 // correct PASS/FAIL is unambiguous. Results render on STATE_SELFTEST.
 // ===========================================================================
 
-#define MAX_TEST_LINES 64
+#define MAX_TEST_LINES 72
 static char  g_lines[MAX_TEST_LINES][40];
 static uint8_t g_ok[MAX_TEST_LINES];
 static int   g_count = 0;
@@ -371,7 +371,7 @@ void selftest_run(void) {
         check("Pup L3: self +2/+2 and ally +1/+1", pupOk && allyOk);
     }
 
-    // T28: Hen L3 buffs BOTH neighbours +2/+1 on end of turn.
+    // T28: Hen L3 buffs BOTH neighbours +2/+2 on end of turn.
     {
         clear_team(&game.player);
         game.player.slots[0] = mk(0, 1, 2);          // Marmot left
@@ -382,9 +382,9 @@ void selftest_run(void) {
         for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
         game.turn = 1;
         shop_end_turn_advance();
-        bool leftOk  = game.player.slots[0].atk == 3 && game.player.slots[0].hp == 3;
-        bool rightOk = game.player.slots[2].atk == 3 && game.player.slots[2].hp == 3;
-        check("Hen L3: both neighbours +2/+1", leftOk && rightOk);
+        bool leftOk  = game.player.slots[0].atk == 3 && game.player.slots[0].hp == 4;
+        bool rightOk = game.player.slots[2].atk == 3 && game.player.slots[2].hp == 4;
+        check("Hen L3: both neighbours +2/+2", leftOk && rightOk);
     }
 
     // T29: Bee L3 buffs all friends +2/+2 (the L3 jump now adds +2 hp so a wide
@@ -472,10 +472,10 @@ void selftest_run(void) {
 
     // T34: Goat L3 deals 4 to enemies AND 2 to friends. Marmot in slot 0 takes
     // the friendly-fire (Goat sits frontmost in slot 1 and dies on clash).
-    // Marmot hp 8 because both enemy Mice will also faint and each deal 2 dmg
-    // to a random player (only Marmot alive), so 8 - 2 (Goat) - 2 - 2 = 2.
+    // Marmot hp 10 because both enemy Mice will also faint and each deal 3 dmg
+    // to a random player (only Marmot alive), so 10 - 2 (Goat) - 3 - 3 = 2.
     {
-        PetSlot p[] = { mk(0, 0, 8), mkL(7, 0, 1, 3) };  // Marmot + L3 Goat
+        PetSlot p[] = { mk(0, 0, 10), mkL(7, 0, 1, 3) };  // Marmot + L3 Goat
         PetSlot e[] = { mk(0, 1, 4), mk(0, 1, 4) };
         run_battle(p, 2, e, 2);
         check("Goat L3: Marmot ends at 2 hp (friendly+faint)",
@@ -640,9 +640,11 @@ void selftest_run(void) {
     // T_Adder_DeadTarget: Adder should NOT fire on an ally attack that
     // already killed the only enemy. Previously the random_alive helper
     // returned dying-but-still-in-slot pets, so Adder wasted hits on corpses.
+    // The dummy is a Pup (no faint ability) so no other value-3 ability
+    // events pollute the count (Marmot's faint hit is 3 dmg now too).
     {
         PetSlot p[] = { mk(10, 0, 100), mk(0, 100, 100) }; // Adder + heavy ally
-        PetSlot e[] = { mk(0, 0, 1) };                     // dies in 1 hit
+        PetSlot e[] = { mk(1, 0, 1) };                     // Pup, dies in 1 hit
         run_battle(p, 2, e, 1);
         int adderHits = 0;
         for (int i = 0; i < game.battleLogLen; i++)
@@ -709,20 +711,85 @@ void selftest_run(void) {
               game.shop.pets[0] == 12 && (game.shop.frozenPets & 0x1));
     }
 
-    // T_Goose_L3: Goose L3 spawns at 5/5 (was 3/3 at L1) from T1-or-T2 pool.
+    // T_Goose_L3: Goose L3 spawns at 6/6 (was 3/3 at L1) from T1-or-T2 pool.
     {
         PetSlot p[] = { mkL(11, 0, 1, 3) };          // L3 Goose, dies on clash
         PetSlot e[] = { mk(0, 5, 5) };
         run_battle(p, 1, e, 1);
-        int spawned5 = 0;
+        int spawned6 = 0;
         for (int i = 0; i < game.battleLogLen; i++) {
             if (game.battleLog[i].kind == BEV_SPAWN) {
                 int a = game.battleLog[i].value & 0xFF;
                 int h = (game.battleLog[i].value >> 8) & 0xFF;
-                if (a == 5 && h == 5) spawned5++;
+                if (a == 6 && h == 6) spawned6++;
             }
         }
-        check("Goose L3: spawn at 5/5", spawned5 >= 1);
+        check("Goose L3: spawn at 6/6", spawned6 >= 1);
+    }
+
+    // T_Mouse_L3_Fizzle: Mouse L3 hits two DIFFERENT enemies (without
+    // replacement); with only one enemy alive the second hit fizzles —
+    // exactly one 4-dmg ability event.
+    {
+        PetSlot p[] = { mkL(0, 0, 1, 3) };           // L3 Mouse, dies on clash
+        PetSlot e[] = { mk(1, 1, 100) };             // lone sturdy Pup
+        run_battle(p, 1, e, 1);
+        int hits4 = 0;
+        for (int i = 0; i < game.battleLogLen; i++)
+            if (game.battleLog[i].kind == BEV_ABILITY &&
+                game.battleLog[i].value == 4) hits4++;
+        check("Mouse L3: 2nd hit fizzles vs 1 enemy", hits4 == 1);
+    }
+
+    // T_Edelweiss_L2: the Bee Buddy scales with the HOLDER's level —
+    // an L2 holder hatches a 3/3 (1 + level).
+    {
+        PetSlot holder = mkL(1, 0, 1, 2);            // L2 Pup, dies on clash
+        holder.food = 1;                             // holds Edelweiss
+        PetSlot p[] = { holder };
+        PetSlot e[] = { mk(0, 5, 50) };
+        run_battle(p, 1, e, 1);
+        int bee33 = 0;
+        for (int i = 0; i < game.battleLogLen; i++) {
+            if (game.battleLog[i].kind == BEV_SPAWN &&
+                game.battleLog[i].data == 3) {
+                int a = game.battleLog[i].value & 0xFF;
+                int h = (game.battleLog[i].value >> 8) & 0xFF;
+                if (a == 3 && h == 3) bee33++;
+            }
+        }
+        check("Edelweiss: L2 holder hatches 3/3", bee33 == 1);
+    }
+
+    // T_Shop_T1_Only: turn-1 shop rolls never offer above tier 1.
+    {
+        memset(&game.shop, 0, sizeof(Shop));
+        game.turn = 1;
+        bool onlyT1 = true;
+        for (int n = 0; n < 100 && onlyT1; n++) {
+            shop_refill();
+            for (int i = 0; i < MAX_SHOP_PETS; i++) {
+                const PetDef* d = pet_def(game.shop.pets[i]);
+                if (d && d->tier > 1) onlyT1 = false;
+            }
+        }
+        check("Shop turn 1: tier-1 pets only", onlyT1);
+    }
+
+    // T_Shop_T3_Late: by turn 9 the weighted roll produces T3 pets readily
+    // (50% per slot — 50 refills without one would be astronomical).
+    {
+        memset(&game.shop, 0, sizeof(Shop));
+        game.turn = 9;
+        bool sawT3 = false;
+        for (int n = 0; n < 50 && !sawT3; n++) {
+            shop_refill();
+            for (int i = 0; i < MAX_SHOP_PETS; i++) {
+                const PetDef* d = pet_def(game.shop.pets[i]);
+                if (d && d->tier == 3) sawT3 = true;
+            }
+        }
+        check("Shop turn 9: tier-3 pets appear", sawT3);
     }
 
     // T45: Food schedule — at turn 5 the T3 foods can actually appear.

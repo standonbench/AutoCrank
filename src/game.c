@@ -331,11 +331,11 @@ void game_advance_to_battle(void)
     game.battle.teams[0] = game.player;
     game.battle.inBattle = true;
 
-    // Salt Lick: +4 atk for the battle copy only (player team unchanged).
+    // Salt Lick: +5 atk for the battle copy only (player team unchanged).
     for (int i = 0; i < TEAM_SIZE; i++) {
         PetSlot* p = &game.battle.teams[0].slots[i];
         if (p->id != EMPTY_PET && (p->flags & 0x02))
-            p->atk = (int16_t)mini(p->atk + 4, STAT_CAP);
+            p->atk = (int16_t)mini(p->atk + 5, STAT_CAP);
     }
 
     battle_simulate();              // populates battleLog (mutates teams[])
