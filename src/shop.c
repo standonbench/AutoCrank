@@ -27,10 +27,9 @@ void shop_init_run(void) {
 }
 
 void shop_refill(void) {
-    uint8_t tier = mini(shop_current_tier(), MAX_TIER);
     for (int i = 0; i < MAX_SHOP_PETS; i++) {
         if (game.shop.frozenPets & (1 << i)) continue;
-        game.shop.pets[i] = pet_random_in_tier(tier);
+        game.shop.pets[i] = pet_roll_for_turn((uint8_t)game.turn);
     }
     // SAP-style food tiering: only foods whose unlockTurn <= current turn are
     // eligible. Build the pool once per refill — small (FOOD_COUNT = 6).

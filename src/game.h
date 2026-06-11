@@ -440,6 +440,7 @@ int  battle_event_window(int playhead);
 bool battle_resolve_faints(BattleState* bs);
 
 // ai.c
+uint8_t pet_roll_for_turn(uint8_t turn);
 void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed);
 void ai_sim_team(Team* out, uint8_t turn, uint32_t seed);
 void ai_apply_handicap(Team* t, uint8_t wins, uint8_t lives, uint8_t turn);

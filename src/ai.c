@@ -101,11 +101,10 @@ static void ai_apply_buy(AIState* s, uint8_t petId, uint8_t slot) {
     s->gold -= PET_COST;
 }
 
-// Refill the AI's shop with uniform-random picks from the tier band — same
-// draw the player sees. Scaling comes from cumulative turns of spend, not
-// from tilting the shop.
-static void ai_refill_shop(uint8_t shop[3], uint8_t maxTier) {
-    for (int i = 0; i < 3; i++) shop[i] = pet_random_in_tier(maxTier);
+// Refill the AI's shop with the same tier-weighted draw the player sees.
+// Scaling comes from cumulative turns of spend, not from tilting the shop.
+static void ai_refill_shop(uint8_t shop[3], uint8_t turn) {
+    for (int i = 0; i < 3; i++) shop[i] = pet_roll_for_turn(turn);
 }
 
 // Score a shop pet against the current team. Combines always win; otherwise
@@ -124,10 +123,10 @@ static int ai_eval_shop_pet(const AIState* s, uint8_t petId) {
 
 // One simulated shop turn: fresh 10g, buy until nothing useful remains,
 // then roll a few times to chase combines before ending.
-static void ai_simulate_turn(AIState* s, uint8_t maxTier) {
+static void ai_simulate_turn(AIState* s, uint8_t turn) {
     s->gold = STARTING_GOLD;
     uint8_t shop[3];
-    ai_refill_shop(shop, maxTier);
+    ai_refill_shop(shop, turn);
     int rollsLeft = 3;
 
     int safety = 16;
@@ -156,7 +155,7 @@ static void ai_simulate_turn(AIState* s, uint8_t maxTier) {
         } else if (rollsLeft > 0 && s->gold >= ROLL_COST + PET_COST) {
             s->gold -= ROLL_COST;
             rollsLeft--;
-            ai_refill_shop(shop, maxTier);
+            ai_refill_shop(shop, turn);
         } else {
             break;
         }
@@ -183,12 +182,10 @@ void ai_sim_team(Team* out, uint8_t turn, uint32_t seed) {
     }
     s.gold = 0;
 
-    // Tier unlock matches shop_current_tier in shop.c so AI and player live
-    // on the same schedule.
-    for (uint8_t t = 1; t <= turn; t++) {
-        uint8_t tier = (t >= 5) ? 3 : (t >= 3) ? 2 : 1;
-        ai_simulate_turn(&s, tier);
-    }
+    // Same tier-weighted shop schedule the player lives on (pets.c
+    // pet_roll_for_turn drives both).
+    for (uint8_t t = 1; t <= turn; t++)
+        ai_simulate_turn(&s, t);
 
     *out = s.team;
     _rng_state = prevState;

@@ -183,6 +183,34 @@ uint8_t pet_random_in_tier(uint8_t maxTier) {
     return pool[rng_range(0, n - 1)];
 }
 
+// Tier-weighted shop roll. Early turns only offer what's unlocked; from
+// turn 5 the odds shift toward higher tiers so late shops feel premium
+// instead of two-thirds T1/T2 chaff (the old uniform draw). Used by BOTH
+// the player's shop_refill and the AI's journey sim, so the difficulty
+// curve stays self-consistent. T1 never quite vanishes — late T1 copies
+// still feed combines.
+uint8_t pet_roll_for_turn(uint8_t turn) {
+    static const uint8_t W[6][3] = {        // % weights for T1 / T2 / T3
+        { 100,  0,  0 },                    // turns 1-2
+        {  50, 50,  0 },                    // turns 3-4
+        {  35, 45, 20 },                    // turns 5-6
+        {  20, 45, 35 },                    // turns 7-8
+        {  15, 35, 50 },                    // turns 9-10
+        {  10, 30, 60 },                    // turns 11+
+    };
+    int band = (turn <= 2) ? 0 : (turn <= 4) ? 1 : (turn <= 6) ? 2
+             : (turn <= 8) ? 3 : (turn <= 10) ? 4 : 5;
+    int r = rng_range(0, 99);
+    uint8_t tier = (r < W[band][0]) ? 1
+                 : (r < W[band][0] + W[band][1]) ? 2 : 3;
+    uint8_t pool[PET_COUNT];
+    int n = 0;
+    for (uint8_t i = 0; i < PET_COUNT; i++)
+        if (PETS[i].tier == tier) pool[n++] = i;
+    if (n == 0) return 0;
+    return pool[rng_range(0, n - 1)];
+}
+
 // ---------------------------------------------------------------------------
 // Foods (handlers for the simpler ones; others are stubs for now)
 // ---------------------------------------------------------------------------
