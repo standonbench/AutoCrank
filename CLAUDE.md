@@ -10,6 +10,7 @@ make                    # zero warnings required
 make run                # build + open Simulator
 open AutoCrank.pdx      # launch in Simulator manually
 sh tools/runtests.sh    # headless mechanics self-tests (no Simulator needed)
+sh tools/balance.sh     # balance harness: curve / pets / synergy / runs
 ```
 
 Same setup as sibling `CrankSurvivorC/` — `PLAYDATE_SDK_PATH` env or `~/.Playdate/config`.
@@ -36,7 +37,7 @@ Playdate: ARM Cortex-M7, 400×240, 1-bit B/W, 30fps.
 | `src/names.c/.h` | Team-name word pools (`team_name_str`) |
 | `src/save.c` | Versioned save (V4 = lifetime stats + run resume + names + hall of fame) |
 | `src/sound.c` | Synth SFX (implemented). `sfx_attack` is the combat-hit thud |
-| `src/selftest.c` | 59-case mechanics self-test (Title→TEST, or `tools/runtests.sh`) |
+| `src/selftest.c` | 64-case mechanics self-test (Title→TEST, or `tools/runtests.sh`) |
 | `src/mathutil.h` | XORShift RNG, clamp helpers |
 | `src/debug.h` | DLOG/ASSERT (off in release) |
 | `tools/hosttest.c` | Host harness: stub `pd` + `main` to run selftest_run() natively |
@@ -81,14 +82,21 @@ separate `fx_hash` and the playback path NEVER touches the sim `_rng_state` (det
 
 ## SAP-derived numbers
 - Starting gold: 10 per turn
-- Pet/food cost: 3 (Sleeping Pill: 1)
+- Pet cost: 3. Food costs vary: Cheese 1, Hay/Salt 2, Edelweiss/Milk 3, Cowbell 4
 - Roll cost: 1
-- Sell refund: 1 + (level - 1)
+- Sell refund: 1 + (level - 1); Calf adds a +level sell bonus (TRIG_SELL)
 - Combine: 1 XP per duplicate buy. L2 needs 2 XP, L3 needs 5 cumulative
 - Team: 5 slots, attack right-to-left
-- Tier: T1 turn 1, T2 turn 3, T3 turn 5 (v0 caps at T3)
-- Lives: 5; Wins to victory: 10
+- Tier UNLOCK: T1 turn 1, T2 turn 3, T3 turn 5 — but shop rolls are
+  tier-WEIGHTED by turn (`pet_roll_for_turn` in pets.c, shared by the
+  player shop and the AI journey sim; late shops skew T2/T3)
+- Lives: 5; Wins to victory: 10; draws cost/award nothing
 - Stat cap: 50
+- Difficulty (`ai_apply_handicap` in ai.c): named beats, never win-scaled —
+  on-ramp (t1-2 enemy -1hp), alpine hardening (t6+ front +1hp), foothill
+  (8 wins: front +1hp more), summit (9 wins: +1hp ALL, hardening folds in),
+  mercy (<=2 lives -1hp; 1 life also -1atk). Tune via `sh tools/balance.sh`
+  (gates in tools/balance.c headers; run MC target: policy success ~22-32%)
 
 ## Roster (18 pets, 6 per tier) — Swiss-Alpine display names
 T1: Squirrel, Pup, Hen, Hedgehog, Rabbit, Calf
@@ -99,8 +107,9 @@ T3: Alpaca, Highland, Boar, Deer, Fox, Bear
 function names, which keep the original prototype names — e.g.
 `pet_mouse_faint` = Squirrel, `pet_dog_summon` = Pup, `pet_croc_sob` = Alpaca,
 `pet_whale_faint` = Highland, `pet_tiger_sob` = Fox, `pet_parrot_sob` = Deer,
-`pet_dragon_buy` = Bear. Some `pets.c` comments use yet a third set
-(Marmot/Bernard/Ibex/Reine/Bull). Same pets — do not rename to "fix" them.
+`pet_dragon_buy` = Bear, `pet_cow_sell` = Calf, `pet_boar_clash` = Boar.
+Some `pets.c` comments use yet a third set (Marmot/Bernard/Ibex/Reine/Bull).
+Same pets — do not rename to "fix" them.
 
 ## Style
 - Procedural UI/FX in CrankSurvivor style (dot eyes, no eyebrows on any procedural sprite)
