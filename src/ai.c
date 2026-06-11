@@ -237,8 +237,11 @@ void ai_sim_team(Team* out, uint8_t turn, uint32_t seed) {
 void ai_apply_handicap(Team* t, uint8_t wins, uint8_t lives, uint8_t turn) {
     int hpDelta = 0, atkDelta = 0, frontHp = 0;
     if (turn <= 2)                hpDelta -= 1;   // on-ramp
-    if (wins == 8)                frontHp  = 1;   // foothill
-    if (wins >= 9)                hpDelta += 1;   // the final summit
+    if (turn >= 6)                frontHp += 1;   // alpine hardening
+    if (wins == 8)                frontHp += 1;   // foothill
+    if (wins >= 9) { hpDelta += 1; frontHp -= 1; } // summit: the hardening
+    if (frontHp < 0)              frontHp  = 0;    // folds into a full-team
+                                                   // bump, it doesn't stack
     if (lives >= 1 && lives <= 2) hpDelta -= 1;   // mercy
     if (lives == 1)               atkDelta -= 1;  // deep mercy
     if (!hpDelta && !atkDelta && !frontHp) return;
