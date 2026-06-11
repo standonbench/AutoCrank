@@ -163,7 +163,11 @@ static void ai_simulate_turn(AIState* s, uint8_t maxTier) {
     }
 }
 
-void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed) {
+// Pure journey sim: the team a competent shopper would field on `turn`,
+// given `seed`. No difficulty tilt — that lives in ai_apply_handicap so the
+// balance harness can drive the two independently (run-level Monte Carlo
+// pilots this same policy as the "player").
+void ai_sim_team(Team* out, uint8_t turn, uint32_t seed) {
     uint32_t prevState = _rng_state;
     rng_seed(seed);
 
@@ -186,31 +190,44 @@ void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed) {
         ai_simulate_turn(&s, tier);
     }
 
-    // Win-streak ghost-team scaling — the only post-sim tilt. Two goals:
-    // streakers face progressively sturdier ghosts so reaching 10 wins feels
-    // earned, but the tilt stays gentle and HP-biased. Front-line combat is
-    // extremely swingy (the balance harness shows a flat +1/+1 to every enemy
-    // pet flips an even matchup into a ~70% loss), so a heavy symmetric bump
-    // turns the back half into an unwinnable spiral. Extra HP adds durability
-    // without speeding up kills (less snowball) while a smaller, slower atk
-    // bump keeps some teeth. A player on the ropes (<=2 lives) gets a one-step
-    // mercy so a rough patch can still be clawed back.
-    int hpBump  = (int)game.wins / 4;          // +1 hp per 4 wins
-    int atkBump = (int)game.wins / 6;          // +1 atk per 6 wins (slower)
-    if (game.lives > 0 && game.lives <= 2) { hpBump--; atkBump--; }
-    if (hpBump  > 2) hpBump  = 2;              // caps: at most +1/+2 late game
-    if (atkBump > 1) atkBump = 1;
-    if (hpBump  < 0) hpBump  = 0;
-    if (atkBump < 0) atkBump = 0;
-    if (hpBump || atkBump) {
-        for (int i = 0; i < TEAM_SIZE; i++) {
-            PetSlot* p = &s.team.slots[i];
-            if (p->id == EMPTY_PET) continue;
-            p->atk = (int16_t)mini(p->atk + atkBump, STAT_CAP);
-            p->hp  = (int16_t)mini(p->hp + hpBump,  STAT_CAP);
-        }
-    }
-
     *out = s.team;
     _rng_state = prevState;
+}
+
+// Difficulty tilt, applied after the sim. Design rules (balance harness):
+// every ±1 total enemy stat moves the policy-player winrate ~∓2.5%, so all
+// deltas here are SINGLE-DIGIT totals. No tilt at 0-7 wins — mid-run success
+// is never punished (the old wins-scaled bump rubber-banded the run into a
+// 70%-loss wall exactly when the player approached victory). Instead the
+// climb has three named beats:
+//   on-ramp  (turns 1-2):  enemies -1 hp — first battles tilt player-ward
+//   foothill (at 8 wins):  frontmost enemy +1 hp — the climb stiffens
+//   summit   (at 9 wins):  all enemies +1 hp — the epic, ~55-60% final fight
+// Mercy is independent and stacks: <=2 lives softens, last life softens more.
+void ai_apply_handicap(Team* t, uint8_t wins, uint8_t lives, uint8_t turn) {
+    int hpDelta = 0, atkDelta = 0, frontHp = 0;
+    if (turn <= 2)                hpDelta -= 1;   // on-ramp
+    if (wins == 8)                frontHp  = 1;   // foothill
+    if (wins >= 9)                hpDelta += 1;   // the final summit
+    if (lives >= 1 && lives <= 2) hpDelta -= 1;   // mercy
+    if (lives == 1)               atkDelta -= 1;  // deep mercy
+    if (!hpDelta && !atkDelta && !frontHp) return;
+
+    int front = -1;                               // battle.c: rightmost fights
+    for (int i = TEAM_SIZE - 1; i >= 0; i--)
+        if (t->slots[i].id != EMPTY_PET) { front = i; break; }
+
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        PetSlot* p = &t->slots[i];
+        if (p->id == EMPTY_PET) continue;
+        int hp  = p->hp + hpDelta + (i == front ? frontHp : 0);
+        int atk = p->atk + atkDelta;
+        p->hp  = (int16_t)mini(hp  < 1 ? 1 : hp,  STAT_CAP);
+        p->atk = (int16_t)mini(atk < 0 ? 0 : atk, STAT_CAP);
+    }
+}
+
+void ai_generate_opponent(Team* out, uint8_t turn, uint32_t seed) {
+    ai_sim_team(out, turn, seed);
+    ai_apply_handicap(out, game.wins, game.lives, turn);
 }

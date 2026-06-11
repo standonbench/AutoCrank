@@ -10,6 +10,7 @@
 #         sh tools/balance.sh curve    # difficulty curve only
 #         sh tools/balance.sh pets     # per-pet power (random teams) only
 #         sh tools/balance.sh synergy  # archetype round-robin (support decks)
+#         sh tools/balance.sh runs     # full-run Monte Carlo (policy pilot)
 # ---------------------------------------------------------------------------
 set -e
 cd "$(dirname "$0")/.."

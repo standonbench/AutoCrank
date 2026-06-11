@@ -76,22 +76,25 @@ static int sim_match(const Team* a, const Team* b) {
 // ---------------------------------------------------------------------------
 // Report 1: difficulty curve
 // ---------------------------------------------------------------------------
-static void curve_pass(const char* label, int lives) {
+// One curve table. winsOverride < 0 → wins = turn-1 (wins roughly track
+// turns survived); otherwise every row uses that fixed win count (climax
+// rows: what does the battle AT 9 wins look like on each turn?).
+static void curve_pass(const char* label, int lives, int winsOverride,
+                       int turnLo, int turnHi) {
     const int SEEDS = 500;
-    game.lives = (uint8_t)lives;   // enemy bump reads this (comeback at <=2)
     printf("\n-- %s --\n", label);
     printf("turn  playerWin%%   draw%%   loss%%    avgPlayerStat  avgEnemyStat\n");
     printf("----  ----------   -----   -----    -------------  ------------\n");
-    for (int turn = 1; turn <= 10; turn++) {
-        int W = turn - 1;                  // wins roughly track turns survived
+    for (int turn = turnLo; turn <= turnHi; turn++) {
+        int W = (winsOverride >= 0) ? winsOverride : turn - 1;
         int win = 0, loss = 0, draw = 0;
         long pstat = 0, estat = 0;
         for (int s = 0; s < SEEDS; s++) {
             uint32_t seedP = rng_next(), seedE = rng_next();
             Team P, E;
-            game.lives = (uint8_t)lives;
-            game.wins = 0;            ai_generate_opponent(&P, (uint8_t)turn, seedP);
-            game.wins = (uint8_t)W;   ai_generate_opponent(&E, (uint8_t)turn, seedE);
+            ai_sim_team(&P, (uint8_t)turn, seedP);
+            ai_sim_team(&E, (uint8_t)turn, seedE);
+            ai_apply_handicap(&E, (uint8_t)W, (uint8_t)lives, (uint8_t)turn);
             pstat += team_stat(&P); estat += team_stat(&E);
             // Player as side0, then as side1, to cancel any side bias.
             int r1 = sim_match(&P, &E);
@@ -108,19 +111,23 @@ static void curve_pass(const char* label, int lives) {
 }
 
 static void balance_curve(void) {
+    rng_seed(0xBA1A9CE5u ^ 0x101);   // independent of other reports
     printf("\n== DIFFICULTY CURVE ==\n");
-    printf("Competent player (unbumped) vs the turn-matched, win-streak-bumped enemy.\n");
-    printf("Each row = 500 seeds x2 orderings. Baseline-skill player; a real (better)\n");
-    printf("player wins more. Lower player-win%% = harder climb; compare the two passes\n");
-    printf("to see the <=2-lives comeback mercy ease the enemy.\n");
-    curve_pass("HEALTHY (5 lives) — streaker challenge", 5);
-    curve_pass("ON THE ROPES (2 lives) — comeback mercy active", 2);
+    printf("Policy player (no handicap) vs the turn-matched, handicapped enemy.\n");
+    printf("Each row = 500 seeds x2 orderings. Policy-skill player; a real (better)\n");
+    printf("player wins more. Gates: t1-2 loss<=22 (G1); t3-8 loss 28-40 (G2);\n");
+    printf("CLIMAX rows loss 45-55 (G3); mercy passes >=8 / >=14 pts easier (G4).\n");
+    curve_pass("HEALTHY (5 lives), wins=turn-1", 5, -1, 1, 10);
+    curve_pass("ON THE ROPES (2 lives) — mercy", 2, -1, 1, 10);
+    curve_pass("LAST LIFE (1 life) — deep mercy", 1, -1, 1, 10);
+    curve_pass("CLIMAX — the battle at 9 wins (healthy)", 5, 9, 9, 12);
 }
 
 // ---------------------------------------------------------------------------
 // Report 2: per-pet power
 // ---------------------------------------------------------------------------
 static void balance_pets(void) {
+    rng_seed(0xBA1A9CE5u ^ 0x202);   // independent of other reports
     const int ITER = 6000;
     long wins[PET_COUNT] = {0}, games[PET_COUNT] = {0};
     int s0win = 0, dr = 0;
@@ -202,7 +209,13 @@ static const int8_t PARTNERS[PET_COUNT][4] = {
     /*16 Fox re-fire-right  */ { 13, 14, 17,  7 },   // 12 placed to its RIGHT
     /*17 Bear buy(shop)     */ { 14, 13, 12,  7 },   // out-of-combat value
 };
-static int is_shop_phase(uint8_t id) { return id == 2 || id == 5 || id == 17; }
+// Pets whose value accrues in the SHOP (gold, or permanent stat growth from
+// buy/EOT triggers writing back to the live team) — their L1-base-stat combat
+// score here is an artifact, not a verdict. Pup(1)/Haflinger(8) grow off
+// every fresh shop buy via FRIEND_SUMMONED; Hen(2) compounds at end of turn.
+static int is_shop_phase(uint8_t id) {
+    return id == 1 || id == 2 || id == 5 || id == 8 || id == 17;
+}
 
 static void put(Team* t, int slot, uint8_t id) {
     const PetDef* d = pet_def(id);
@@ -235,6 +248,7 @@ static void jitter(Team* t) {              // +0..1 per stat, samples build vari
 }
 
 static void balance_synergy(void) {
+    rng_seed(0xBA1A9CE5u ^ 0x303);   // independent of other reports
     // Round-robin the 18 support decks against each other (self-calibrating:
     // no arbitrary benchmark; field average ~= (1 - draw)/2). Each deck is
     // headlined by its pet, so the win rate reads as "that archetype vs the
@@ -281,6 +295,85 @@ static void balance_synergy(void) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Report 4: RUN MONTE CARLO — the headline metric.
+//
+// Pilots the AI shopping policy through ENTIRE runs (10 wins to victory,
+// 5 lives, draws cost/award nothing — mirrors game.c) against opponents
+// generated exactly the way the game does (per-turn seed + handicap).
+// Humans outplay the greedy policy, so the human run-success rate sits
+// well above this number. Gates: policy success 22-32% (G7 → human ~40%);
+// mean battles <= 18, mean turns <= 17, draws <= 25% (G8); every combat
+// pet present in >= 2% of winning final teams (G9).
+// ---------------------------------------------------------------------------
+static void balance_runs(void) {
+    rng_seed(0xBA1A9CE5u ^ 0x404);   // independent of other reports
+    const int RUNS = 2000;
+    int success = 0;
+    long totBattles = 0, totTurns = 0, totDraws = 0;
+    int winsAtDeath[10] = {0};            // wins held when the run died
+    long pickWin[PET_COUNT] = {0}, pickLoss[PET_COUNT] = {0};
+    long winRuns = 0, lossRuns = 0;
+
+    for (int n = 0; n < RUNS; n++) {
+        uint32_t playerSeed = rng_next();
+        uint32_t runSeed    = rng_next();
+        int wins = 0, lives = 5;
+        int turn, battles = 0, draws = 0;
+        Team P;
+        clear_team(&P);
+        for (turn = 1; wins < 10 && lives > 0 && turn <= 25; turn++) {
+            ai_sim_team(&P, (uint8_t)turn, playerSeed);
+            Team E;
+            ai_sim_team(&E, (uint8_t)turn,
+                        runSeed ^ (uint32_t)turn * 0x9E3779B9u);
+            ai_apply_handicap(&E, (uint8_t)wins, (uint8_t)lives,
+                              (uint8_t)turn);
+            int r = sim_match(&P, &E);
+            battles++;
+            if (r == 0) wins++;
+            else if (r == 1) lives--;
+            else draws++;
+        }
+        totBattles += battles;
+        totTurns   += turn - 1;
+        totDraws   += draws;
+        int won = (wins >= 10);
+        if (won) { success++; winRuns++; }
+        else     { lossRuns++; winsAtDeath[wins < 10 ? wins : 9]++; }
+        for (int i = 0; i < TEAM_SIZE; i++) {
+            uint8_t id = P.slots[i].id;
+            if (id < PET_COUNT) {
+                if (won) pickWin[id]++; else pickLoss[id]++;
+            }
+        }
+    }
+
+    printf("\n== RUN MONTE CARLO (%d full runs, policy player) ==\n", RUNS);
+    printf("Greedy-policy pilot; humans outplay it, so human success >> this.\n");
+    printf("Gate G7: success 22-32%%.  G8: battles<=18, turns<=17, draws<=25%%.\n\n");
+    printf("run success   : %5.1f%%  (%d / %d)\n",
+           100.0 * success / RUNS, success, RUNS);
+    printf("mean battles  : %5.1f\n", (double)totBattles / RUNS);
+    printf("mean turns    : %5.1f\n", (double)totTurns / RUNS);
+    printf("draw rate     : %5.1f%% of battles\n",
+           100.0 * totDraws / (totBattles > 0 ? totBattles : 1));
+    printf("\nwins held when a failed run died:\n  ");
+    for (int w = 0; w < 10; w++) printf("%d:%3d  ", w, winsAtDeath[w]);
+    printf("\n\nfinal-team presence, winning vs losing runs (lift>1 = carried "
+           "winners;\nread for dead pets and auto-includes, not fine ordering "
+           "— reflects\nthe greedy policy's taste, not human meta):\n\n");
+    printf("pet            win%%   loss%%   lift\n");
+    printf("-----------   -----   -----   ----\n");
+    for (int id = 0; id < PET_COUNT; id++) {
+        double pw = winRuns  ? 100.0 * pickWin[id]  / winRuns  : 0.0;
+        double pl = lossRuns ? 100.0 * pickLoss[id] / lossRuns : 0.0;
+        double lift = (pl > 0.5) ? pw / pl : 0.0;
+        printf("%-11s   %5.1f   %5.1f   %4.2f\n",
+               pet_name((uint8_t)id), pw, pl, lift);
+    }
+}
+
 int main(int argc, char** argv) {
     g_sys.logToConsole = stub_log;
     g_sys.error        = stub_log;
@@ -289,18 +382,20 @@ int main(int argc, char** argv) {
     g_api.file   = &g_file;
     pd = &g_api;
 
-    rng_seed(0xBA1A9CE5);    // fixed seed => reproducible reports
-
-    int doCurve = 1, doPets = 1, doSyn = 1;
+    // Each report re-seeds itself (fixed, distinct), so reports are
+    // reproducible AND independent — adding a report never perturbs another.
+    int doCurve = 1, doPets = 1, doSyn = 1, doRuns = 1;
     if (argc > 1) {
         char c = argv[1][0];
         doCurve = (c == 'c');
         doPets  = (c == 'p');
         doSyn   = (c == 's');
-        if (c == 'a') { doCurve = doPets = doSyn = 1; }
+        doRuns  = (c == 'r');
+        if (c == 'a') { doCurve = doPets = doSyn = doRuns = 1; }
     }
     if (doCurve) balance_curve();
     if (doPets)  balance_pets();
     if (doSyn)   balance_synergy();
+    if (doRuns)  balance_runs();
     return 0;
 }
