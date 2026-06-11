@@ -27,9 +27,35 @@ static bool is_buffer(uint8_t id) {
     return id == 1 || id == 8 || id == 9 || id == 10;
 }
 
+// Seed-derived shopping taste. Without it every late-game ghost converges on
+// the same greedy stat-pile; with it, one opponent hoards summoners, the next
+// drafts the snipe package, the next goes wide on buffs — late opponents read
+// as archetypes you can scout and answer. BALANCED keeps pure-greedy in the
+// rotation (and is forced before turn 4: tiny teams shouldn't go off-meta).
+//   SWARM : Pup, Rabbit, Sheep, Haflinger, Donkey, Duck
+//   SNIPER: Squirrel, Goat, Alligator, Alpaca, Highland, Deer, Fox
+//   BUFFER: Hen, Hedgehog, Calf, Boar, Bear
+enum { AI_BALANCED = 0, AI_SWARM = 1, AI_SNIPER = 2, AI_BUFFER = 3 };
+
+static bool persona_loves(uint8_t persona, uint8_t id) {
+    switch (persona) {
+        case AI_SWARM:
+            return id == 1 || id == 4 || id == 6 || id == 8 || id == 9 ||
+                   id == 11;
+        case AI_SNIPER:
+            return id == 0 || id == 7 || id == 10 || id == 12 || id == 13 ||
+                   id == 15 || id == 16;
+        case AI_BUFFER:
+            return id == 2 || id == 3 || id == 5 || id == 14 || id == 17;
+        default:
+            return false;
+    }
+}
+
 typedef struct {
     Team    team;
     int16_t gold;
+    uint8_t persona;
 } AIState;
 
 static int ai_find_combine(const AIState* s, uint8_t petId) {
@@ -115,6 +141,9 @@ static int ai_eval_shop_pet(const AIState* s, uint8_t petId) {
     if (ai_find_combine(s, petId) >= 0) return 1000;
     const PetDef* d = pet_def(petId);
     int base = d ? (d->baseAtk + d->baseHp + d->tier * 3) : 0;
+    if (persona_loves(s->persona, petId)) base += 5;   // taste, not law —
+    // comparable to the +6 summoner/buffer pairing bonus, so personas bend
+    // the greedy pick order without overruling a clearly better pet.
     if (ai_find_empty(s) >= 0) return base + ai_synergy_bonus(s, petId);
     // Team full — only attractive if a weak L1 can be cheaply swapped out.
     if (ai_find_replacement_target(s, petId) >= 0) return base - 5;
@@ -181,6 +210,10 @@ void ai_sim_team(Team* out, uint8_t turn, uint32_t seed) {
         s.team.slots[i].flags = 0;
     }
     s.gold = 0;
+    // Persona bits sit above the low bits rng_range consumes first, and the
+    // whole derivation is a pure function of (seed, turn) — deterministic,
+    // resume-safe, no save-format change.
+    s.persona = (turn >= 4) ? (uint8_t)((seed >> 9) & 3) : (uint8_t)AI_BALANCED;
 
     // Same tier-weighted shop schedule the player lives on (pets.c
     // pet_roll_for_turn drives both).
