@@ -25,6 +25,9 @@ void apply_event(BattleState* bs, BattleEvent* e) {
                 p->xp = 0;
                 p->food = EMPTY_FOOD;
                 p->flags = 0;
+                // A dead Deer's recorded copies die with it — a later SPAWN
+                // into this slot must not inherit them.
+                pets_clear_copy_slot(e->side, e->slot);
                 // Mark the slot's eased x as stale; if a SPAWN re-occupies
                 // this slot, the new unit should snap into the rank, not
                 // drift from wherever the flyoff left the position.
@@ -194,6 +197,7 @@ bool battle_resolve_faints(BattleState* bs)
 void battle_begin(void) {
     game.battleLogLen = 0;
     trig_reset();
+    pets_reset_copies();
     render_battle_reset_positions();
     projectiles_reset();
 }

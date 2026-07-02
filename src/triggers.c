@@ -72,8 +72,10 @@ void trig_drain(BattleState* bs)
             const PetDef* def = pet_def(p->id);
             if (!def) continue;
             PetHandler h = def->handlers[ev.kind];
-            if (!h) continue;
-            h(bs, order[i].side, order[i].slot, &ev);
+            if (h) h(bs, order[i].side, order[i].slot, &ev);
+            // Deer-copied abilities fire on the copied pet's real trigger
+            // kind — even when this pet has no own handler for it.
+            pets_fire_copied(bs, order[i].side, order[i].slot, &ev);
         }
     }
 }

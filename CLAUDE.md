@@ -110,6 +110,9 @@ function names, which keep the original prototype names — e.g.
 `pet_dragon_buy` = Bear, `pet_cow_sell` = Calf, `pet_boar_clash` = Boar.
 Some `pets.c` comments use yet a third set (Marmot/Bernard/Ibex/Reine/Bull).
 Same pets — do not rename to "fix" them.
+**Deer copy:** `pet_parrot_sob` records neighbours into a battle-scoped table
+(`g_copiedPet` in pets.c); `trig_drain` fires copied handlers on their real
+trigger kinds via `pets_fire_copied` (SOB copies still run directly at SOB).
 
 ## Style
 - Procedural UI/FX in CrankSurvivor style (dot eyes, no eyebrows on any procedural sprite)

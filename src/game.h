@@ -425,6 +425,10 @@ const PetDef* pet_def(uint8_t id);
 uint8_t pet_random_in_tier(uint8_t maxTier);
 const char* pet_name(uint8_t id);
 int  pet_xp_for_level(uint8_t level);
+// Deer battle-long ability copies (see g_copiedPet in pets.c)
+void pets_reset_copies(void);
+void pets_clear_copy_slot(uint8_t side, uint8_t slot);
+void pets_fire_copied(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 
 // battle.c
 void battle_begin(void);

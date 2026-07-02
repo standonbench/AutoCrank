@@ -631,6 +631,47 @@ static void pet_dragon_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerE
 static int g_abilityDepth = 0;
 #define ABILITY_MAX_DEPTH 6
 
+// --- Deer's battle-long ability copy ----------------------------------------
+// Deer promises "copy left ally's ability", but most abilities live on
+// non-SOB triggers (Alligator: FRIEND_ATTACK, Haflinger: FRIEND_SUMMONED).
+// At start of battle pet_parrot_sob records the copied neighbour ids here;
+// trig_drain then fires the copied pet's handler for every trigger kind AS
+// the Deer (its slot/level). Strictly battle-scoped: reset in battle_begin,
+// gated on the live battle in pets_fire_copied, and cleared when the slot's
+// FAINT applies so a later summon into the slot can't inherit the copies.
+// Copies are not transitive — a copied Deer only owns an SOB handler, and
+// SOB is skipped below (pet_parrot_sob already ran SOB copies directly).
+static uint8_t g_copiedPet[2][TEAM_SIZE][2];
+
+void pets_reset_copies(void) {
+    memset(g_copiedPet, EMPTY_PET, sizeof(g_copiedPet));
+}
+
+void pets_clear_copy_slot(uint8_t side, uint8_t slot) {
+    if (side >= 2 || slot >= TEAM_SIZE) return;
+    g_copiedPet[side][slot][0] = EMPTY_PET;
+    g_copiedPet[side][slot][1] = EMPTY_PET;
+}
+
+void pets_fire_copied(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Only the real battle sim: shop drains use a scratch BattleState and run
+    // with inBattle false, so a stale table can never fire in the shop.
+    if (!game.battle.inBattle || bs != &game.battle) return;
+    if (ev->kind == TRIG_START_OF_BATTLE) return;  // double-fire guard (see above)
+    for (int k = 0; k < 2; k++) {
+        uint8_t cid = g_copiedPet[side][slot][k];
+        if (cid == EMPTY_PET) continue;
+        const PetDef* def = pet_def(cid);
+        if (!def) continue;
+        PetHandler h = def->handlers[ev->kind];
+        if (!h) continue;
+        if (g_abilityDepth >= ABILITY_MAX_DEPTH) return;
+        g_abilityDepth++;
+        h(bs, side, slot, ev);
+        g_abilityDepth--;
+    }
+}
+
 static void pet_tiger_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
     // Re-fire the start-of-battle ability of the pet on our RIGHT (slot+1),
     // once per Tiger level. Turns a Crocodile/Bee next to Tiger into a combo.
@@ -658,11 +699,14 @@ static void pet_tiger_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEv
 }
 
 static void pet_parrot_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Ibex copies a neighbour's start-of-battle ability and runs it AS itself
-    // (using Ibex's own slot/level — so the copy already runs at Ibex's level,
-    // i.e. "+1 power" naturally at L2 vs. a typical L1 neighbour).
+    // Ibex copies a neighbour's ability for the whole battle and runs it AS
+    // itself (using Ibex's own slot/level — so the copy already runs at Ibex's
+    // level, i.e. "+1 power" naturally at L2 vs. a typical L1 neighbour).
     // L1: copy left. L2: copy left (at higher own-level power).
     // L3: copy both left AND right neighbours.
+    // SOB abilities fire right here (direct call, attack-order guaranteed);
+    // every other trigger kind is recorded in g_copiedPet and dispatched by
+    // trig_drain via pets_fire_copied when the copied trigger actually fires.
     if (g_abilityDepth >= ABILITY_MAX_DEPTH) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
 
@@ -671,20 +715,26 @@ static void pet_parrot_sob(BattleState* bs, uint8_t side, uint8_t slot, TriggerE
     if ((int)slot - 1 >= 0)            neighbours[n++] = (int)slot - 1;
     if (lvl >= 3 && (int)slot + 1 < TEAM_SIZE) neighbours[n++] = (int)slot + 1;
 
+    // Re-clear before recording: a Fox re-fire re-runs this handler, and the
+    // copy set must not stack (idempotent re-record of the same neighbours).
+    pets_clear_copy_slot(side, slot);
+
     // Self-fire glyph so the player sees Ibex doing something even when the
-    // copied ability has no on-source visual (Bee-style buffers, etc.).
+    // copied ability has no start-of-battle component (Haflinger/Alligator).
     bool fired = false;
+    int nCopied = 0;
     for (int k = 0; k < n; k++) {
         PetSlot* p = &bs->teams[side].slots[neighbours[k]];
         if (p->id == EMPTY_PET) continue;
         const PetDef* def = pet_def(p->id);
         if (!def) continue;
-        PetHandler h = def->handlers[TRIG_START_OF_BATTLE];
-        if (!h) continue;
+        if (nCopied < 2) g_copiedPet[side][slot][nCopied++] = p->id;
         if (!fired) {
             battle_log_push(BEV_ABILITY, side, slot, 0, slot);
             fired = true;
         }
+        PetHandler h = def->handlers[TRIG_START_OF_BATTLE];
+        if (!h) continue;
         g_abilityDepth++;
         h(bs, side, slot, ev);
         g_abilityDepth--;

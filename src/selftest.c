@@ -878,6 +878,72 @@ void selftest_run(void) {
         check("Deer/Fox: re-fire count is attack-order independent", n8 == 3);
     }
 
+    // T50: Ibex copies Adder's FRIEND_ATTACK ability, not just SOB. Alligator
+    // left of an L2 Deer, Pup up front clashing: every Pup attack fires the
+    // real Alligator snipe (L1 = 3 dmg) AND the Deer copy at Deer's own level
+    // (L2 = 5 dmg) — the distinct values pin who fired. Pre-fix the copy
+    // silently no-oped (Alligator has no SOB handler to look up).
+    {
+        PetSlot p[] = { mk(10, 0, 50), mkL(15, 0, 50, 2), mk(1, 1, 50) };
+        PetSlot e[] = { mk(1, 0, 60) };
+        run_battle(p, 3, e, 1);
+        int n3 = 0, n5 = 0;
+        for (int i = 0; i < game.battleLogLen; i++) {
+            if (game.battleLog[i].kind != BEV_ABILITY) continue;
+            if (game.battleLog[i].value == 3) n3++;
+            if (game.battleLog[i].value == 5) n5++;
+        }
+        check("Ibex copies Adder ally-attack snipe", n3 >= 1 && n5 >= 1);
+    }
+
+    // T51: Ibex copies Bernard-buffer (Haflinger) FRIEND_SUMMONED. Hopper dies
+    // on clash 1 and respawns in-slot; the spawn must be buffed by the real
+    // Haflinger AND the Deer copy: exactly 2 BEV_BUFF of +2/+1 (0x0102).
+    {
+        PetSlot p[] = { mk(8, 1, 50), mk(15, 1, 50), mk(4, 1, 1) };
+        PetSlot e[] = { mk(1, 3, 40) };
+        run_battle(p, 3, e, 1);
+        int nb = 0;
+        for (int i = 0; i < game.battleLogLen; i++)
+            if (game.battleLog[i].kind == BEV_BUFF &&
+                game.battleLog[i].value == ((1 << 8) | 2)) nb++;
+        check("Ibex copies Haflinger summon buff", nb == 2);
+    }
+
+    // T52: Ibex L3 copies BOTH neighbours across mixed trigger kinds:
+    // left Alligator (FRIEND_ATTACK, at Ibex L3 = 5 dmg x2 targets) and right
+    // Alpaca (SOB, at Ibex L3 = 15 dmg). Exactly one 15-dmg ABILITY and an
+    // even count >= 2 of 5-dmg ABILITY events.
+    {
+        PetSlot p[] = { mk(10, 0, 50), mkL(15, 0, 50, 3), mk(12, 5, 50) };
+        PetSlot e[] = { mk(1, 1, 200), mk(1, 1, 200) };
+        run_battle(p, 3, e, 2);
+        int n15 = 0, n5 = 0;
+        for (int i = 0; i < game.battleLogLen; i++) {
+            if (game.battleLog[i].kind != BEV_ABILITY) continue;
+            if (game.battleLog[i].value == 15) n15++;
+            if (game.battleLog[i].value == 5)  n5++;
+        }
+        check("Ibex L3: mixed-trigger copies fire", n15 == 1 && n5 >= 2);
+    }
+
+    // T53: copies are battle-scoped. Battle records Deer copying Hen (EOT
+    // buffer); afterwards a shop end-of-turn drain over game.player must NOT
+    // fire the copied Hen (the shop drain uses a scratch BattleState and
+    // inBattle is false — pets_fire_copied gates on both).
+    {
+        PetSlot p[] = { mk(2, 1, 50), mk(15, 1, 50) };
+        PetSlot e[] = { mk(1, 1, 1) };
+        run_battle(p, 2, e, 1);
+        clear_team(&game.player);
+        game.player.slots[0] = mk(1, 3, 2);   // Pup, left of Deer
+        game.player.slots[1] = mk(15, 3, 3);  // Deer in the same slot as battle
+        int atkBefore = game.player.slots[0].atk;
+        trig_push(TRIG_END_OF_TURN, 0, 0, 0, 0);
+        trig_shop_drain();
+        check("Ibex copy is battle-scoped", game.player.slots[0].atk == atkBefore);
+    }
+
     DLOG("SELFTEST: %d passed, %d failed", g_pass, g_fail);
 }
 
