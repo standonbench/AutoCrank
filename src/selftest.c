@@ -927,6 +927,64 @@ void selftest_run(void) {
         check("Ibex L3: mixed-trigger copies fire", n15 == 1 && n5 >= 2);
     }
 
+    // T54: simultaneous AoE deaths share ONE faint window. Highland L3 dies
+    // to the clash and its 8-dmg AoE wipes all three enemies — the four
+    // BEV_FAINTs land as one consecutive run, and only the group head may
+    // own a nonzero animation window (the rest fly off with it).
+    {
+        PetSlot p[] = { mkL(13, 0, 1, 3) };
+        PetSlot e[] = { mk(1, 1, 8), mk(1, 1, 8), mk(1, 1, 8) };
+        run_battle(p, 1, e, 3);
+        int nF = 0, nWin = 0;
+        for (int i = 0; i < game.battleLogLen; i++) {
+            if (game.battleLog[i].kind != BEV_FAINT) continue;
+            nF++;
+            if (battle_event_window(i) > 0) nWin++;
+        }
+        check("Faint group: AoE deaths share one window", nF == 4 && nWin == 1);
+    }
+
+    // T55: clash-fold regression guard — a plain mutual KO (no parting
+    // actions) still folds BOTH faints to zero; the fly-offs played inside
+    // the clash window itself and the group logic must not resurrect them.
+    {
+        PetSlot p[] = { mk(1, 5, 3) };
+        PetSlot e[] = { mk(1, 5, 3) };
+        run_battle(p, 1, e, 1);
+        int nF = 0, nWin = 0;
+        for (int i = 0; i < game.battleLogLen; i++) {
+            if (game.battleLog[i].kind != BEV_FAINT) continue;
+            nF++;
+            if (battle_event_window(i) > 0) nWin++;
+        }
+        check("Faint group: mutual clash KO stays folded", nF == 2 && nWin == 0);
+    }
+
+    // T56: invariant over a busy faint-cascade battle (Goat AoE + Squirrel
+    // snipes + Sheep spawns on both sides): every consecutive run of
+    // BEV_FAINT events contains at most one nonzero-window member.
+    {
+        PetSlot p[] = { mk(7, 2, 6), mk(0, 2, 4), mk(6, 2, 3) };
+        PetSlot e[] = { mk(7, 2, 6), mk(0, 2, 4), mk(6, 2, 3) };
+        run_battle(p, 3, e, 3);
+        bool ok = true;
+        int i = 0;
+        while (i < game.battleLogLen) {
+            if (game.battleLog[i].kind == BEV_FAINT) {
+                int nWin = 0;
+                while (i < game.battleLogLen &&
+                       game.battleLog[i].kind == BEV_FAINT) {
+                    if (battle_event_window(i) > 0) nWin++;
+                    i++;
+                }
+                if (nWin > 1) ok = false;
+            } else {
+                i++;
+            }
+        }
+        check("Faint group: <=1 window per faint run", ok);
+    }
+
     // T53: copies are battle-scoped. Battle records Deer copying Hen (EOT
     // buffer); afterwards a shop end-of-turn drain over game.player must NOT
     // fire the copied Hen (the shop drain uses a scratch BattleState and

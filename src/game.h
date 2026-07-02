@@ -438,6 +438,11 @@ void battle_log_push(BattleEventKind kind, uint8_t side, uint8_t slot, int16_t v
 void battle_emit(BattleState* bs, BattleEventKind kind, uint8_t side, uint8_t slot, int16_t value, uint8_t data);
 int  battle_event_duration(uint8_t kind);
 int  battle_event_window(int playhead);
+// Faint animation queries shared with the renderer: a faint whose fly-off
+// already played inside its clash window, and membership of the current
+// simultaneous-death group (see faint_group_head in battle.c).
+bool battle_faint_folded(int faintIdx);
+bool battle_faint_in_group(int playhead, int side, int slot);
 // Drains all pending FAINTs through the trigger system, cascading. Returns
 // true if any pet fainted. Used by battle sim AND by shop-context food
 // triggers (Sleeping Pill) so synergies fire identically.

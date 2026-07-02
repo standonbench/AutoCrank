@@ -1165,28 +1165,28 @@ static bool clash_kills_with_flyoff(int clashIdx, int side, int slot) {
 }
 
 // True when this slot's pet took lethal damage (hp <= 0) but its BEV_FAINT
-// is still pending further in the log, with at least one animatable event
-// in between. During this "ghost phase" we keep rendering the dying pet at
-// its rank position so on-faint rays/projectiles/buffs read as coming from
-// the actual source, not the survivor easing into its spot.
+// is still pending further in the log. During this "ghost phase" we keep
+// rendering the dying pet at its rank position — so on-faint rays/
+// projectiles/buffs read as coming from the actual source, and the sprite
+// never blinks out ahead of its fly-off (it used to whenever the only
+// events before its FAINT were other pets' faints, e.g. plain AoE wipes
+// or a summon shimmering in elsewhere). Clash-folded faints are excluded:
+// that pet already flew off inside the clash window and must stay gone.
 static bool slot_in_ghost_phase(int side, int slot) {
     if (side < 0 || side >= 2 || slot < 0 || slot >= TEAM_SIZE) return false;
     PetSlot* p = &game.battle.teams[side].slots[slot];
     if (p->id == EMPTY_PET || p->hp > 0) return false;
-    bool sawIntermediate = false;
     for (int j = (int)game.battlePlayhead; j < game.battleLogLen; j++) {
         BattleEvent* e = &game.battleLog[j];
         if (e->kind == BEV_FAINT && (int)e->side == side &&
             (int)e->slot == slot) {
-            return sawIntermediate;
+            return !battle_faint_folded(j);
         }
         // SPAWN replacing this slot ends ghost phase — the new pet
         // shimmers in via the BEV_SPAWN branch and takes over the slot.
         if (e->kind == BEV_SPAWN && (int)e->side == side &&
             (int)e->slot == slot) return false;
         if (e->kind == BEV_CLASH || e->kind == BEV_ATTACK) return false;
-        if (e->kind == BEV_ABILITY || e->kind == BEV_DAMAGE ||
-            e->kind == BEV_BUFF) sawIntermediate = true;
     }
     return false;
 }
@@ -1262,17 +1262,23 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot,
     int restX = (int)fx;
     int feetY = (int)fy;
 
-    // Ability KO — a faint not folded into a clash flies off on its own window.
-    if (e && e->kind == BEV_FAINT && e->side == side && e->slot == slot) {
+    // Ability KO — faints not folded into a clash fly off on the group
+    // head's window. Pets that died together are all members of the current
+    // faint group, so mutual/AoE deaths launch simultaneously.
+    if (e && e->kind == BEV_FAINT &&
+        battle_faint_in_group((int)game.battlePlayhead, side, slot)) {
         if (p->id == EMPTY_PET) return;
         // One-time directional debris puff at the launch point, ejecting the
         // way the unit flies off (replaces the old symmetric spark-star).
-        static int lastFaintBurst = -1;
-        int key = (int)game.battlePlayhead;
-        if (lastFaintBurst != key) {
+        // Latched per slot — a shared group window launches several units,
+        // each shedding its own puff. Key is playhead+1 so slot 0 at
+        // playhead 0 can't collide with the zero-initialised latch.
+        static int lastFaintKey[2][TEAM_SIZE];
+        int key = (int)game.battlePlayhead + 1;
+        if (lastFaintKey[side][slot] != key) {
             int dir = (side == 0) ? -1 : 1;   // matches draw_unit_flyoff backDir
             spawn_debris(restX, feetY - spr / 2, dir);
-            lastFaintBurst = key;
+            lastFaintKey[side][slot] = key;
         }
         draw_unit_flyoff(p, side, restX, feetY, spr, fs, t);
         return;
@@ -1311,7 +1317,7 @@ static void battle_draw_unit(BattleEvent* e, float t, int side, int slot,
     // instead of looking like they emanate from the survivor behind. The
     // proper fly-off plays when BEV_FAINT eventually fires.
     bool selfFaintEv = e && e->kind == BEV_FAINT &&
-                       e->side == side && e->slot == slot;
+                       battle_faint_in_group((int)game.battlePlayhead, side, slot);
     if (!selfFaintEv && slot_in_ghost_phase(side, slot)) {
         int bob = (int)(sinf((float)game.frameCount * 0.18f) * 2.0f);
         int gx = restX;

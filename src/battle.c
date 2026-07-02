@@ -334,7 +334,7 @@ bool damage_in_barrage(int idx) {
 // Edelweiss SPAWN — the render path keeps the unit on-screen as a ghost
 // during those events and defers the fly-off until BEV_FAINT plays. In
 // that case the FAINT needs its full window for the proper send-off.
-static bool faint_from_clash(int faintIdx) {
+bool battle_faint_folded(int faintIdx) {
     if (faintIdx < 0 || faintIdx >= game.battleLogLen) return false;
     BattleEvent* f = &game.battleLog[faintIdx];
     if (f->kind != BEV_FAINT) return false;
@@ -360,6 +360,41 @@ static bool faint_from_clash(int faintIdx) {
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Faint groups. battle_resolve_faints emits the deaths of one resolve pass
+// as a consecutive run of BEV_FAINT events — pets that died "at the same
+// time" (mutual clash KO with parting actions, one AoE wiping several
+// slots). The first NON-clash-folded faint of the run owns a single shared
+// animation window; every other member collapses to zero, so all grouped
+// slots apply in the same frame and (render-side) fly off together.
+// Clash-folded members already flew during the clash window and stay zero.
+// ---------------------------------------------------------------------------
+static int faint_group_head(int faintIdx) {
+    int first = faintIdx;
+    for (int i = faintIdx - 1; i >= 0; i--) {
+        if (game.battleLog[i].kind != BEV_FAINT) break;
+        first = i;
+    }
+    for (int i = first; i <= faintIdx; i++) {
+        if (!battle_faint_folded(i)) return i;
+    }
+    return faintIdx;
+}
+
+// Render-side membership test: while the playhead sits on a faint group's
+// window, every unapplied, non-folded member of the run shares the fly-off.
+bool battle_faint_in_group(int playhead, int side, int slot) {
+    if (playhead < 0 || playhead >= game.battleLogLen) return false;
+    if (game.battleLog[playhead].kind != BEV_FAINT) return false;
+    for (int i = playhead; i < game.battleLogLen; i++) {
+        BattleEvent* e = &game.battleLog[i];
+        if (e->kind != BEV_FAINT) break;
+        if ((int)e->side == side && (int)e->slot == slot)
+            return !battle_faint_folded(i);
+    }
+    return false;
+}
+
 // Animation window for the event at `playhead`. Several events collapse
 // to zero so the playback flows correctly around the projectile system
 // and the clash flyoff:
@@ -373,7 +408,12 @@ static bool faint_from_clash(int faintIdx) {
 int battle_event_window(int playhead) {
     if (playhead < 0 || playhead >= game.battleLogLen) return 0;
     BattleEvent* e = &game.battleLog[playhead];
-    if (e->kind == BEV_FAINT && faint_from_clash(playhead)) return 0;
+    if (e->kind == BEV_FAINT) {
+        if (battle_faint_folded(playhead)) return 0;
+        // Grouped simultaneous deaths: only the group head owns a window.
+        if (faint_group_head(playhead) != playhead) return 0;
+        return battle_event_duration(BEV_FAINT);
+    }
     if (e->kind == BEV_ABILITY && !ability_first_in_barrage(playhead)) return 0;
     if (e->kind == BEV_DAMAGE && damage_in_barrage(playhead)) return 0;
     return battle_event_duration(e->kind);
@@ -412,17 +452,23 @@ void battle_playback_step(void) {
     game.battleClock += (float)speed;
 
     // Advance through events whose animation window has fully elapsed.
+    bool faintSfxFired = false;
     while (game.battlePlayhead < game.battleLogLen) {
         BattleEvent* e = &game.battleLog[game.battlePlayhead];
         float dur = (float)battle_event_window(game.battlePlayhead);
         if (game.battleClock < dur) break;
         game.battleClock -= dur;
         apply_event(bs, e);
-        // Faint whoosh on apply. (Combat hits — clash contact + projectile
-        // impact — fire sfx_attack from render.c at the visual moment, since
-        // ability DAMAGE events collapse to a zero-length window here. There
-        // is no BEV_ATTACK event: the front line trades via BEV_CLASH.)
-        if (e->kind == BEV_FAINT) sfx_faint();
+        // Faint whoosh on apply, once per frame — grouped simultaneous
+        // deaths apply in the same iteration and must not stack the SFX.
+        // (Combat hits — clash contact + projectile impact — fire
+        // sfx_attack from render.c at the visual moment, since ability
+        // DAMAGE events collapse to a zero-length window here. There is
+        // no BEV_ATTACK event: the front line trades via BEV_CLASH.)
+        if (e->kind == BEV_FAINT && !faintSfxFired) {
+            sfx_faint();
+            faintSfxFired = true;
+        }
         game.battlePlayhead++;
     }
 
