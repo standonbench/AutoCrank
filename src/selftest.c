@@ -1002,6 +1002,43 @@ void selftest_run(void) {
         check("Ibex copy is battle-scoped", game.player.slots[0].atk == atkBefore);
     }
 
+    // T59: AI positioning is a deterministic role sort — bodies front
+    // (slot 4 fights first), support back, buy order preserved within a
+    // role. {Alligator, Boar, Squirrel, Highland, Pup} must come out as
+    // [Alligator, Squirrel, Pup | Boar, Highland].
+    {
+        Team t;
+        for (int i = 0; i < TEAM_SIZE; i++) t.slots[i] = mk(EMPTY_PET, 0, 0);
+        t.slots[0] = mk(10, 3, 3); t.slots[1] = mk(14, 5, 6);
+        t.slots[2] = mk(0, 2, 2);  t.slots[3] = mk(13, 4, 8);
+        t.slots[4] = mk(1, 3, 2);
+        ai_position_team(&t);
+        check("AI positioning: role sort is exact",
+              t.slots[0].id == 10 && t.slots[1].id == 0 &&
+              t.slots[2].id == 1  && t.slots[3].id == 14 &&
+              t.slots[4].id == 13);
+    }
+
+    // T60: AI adjacency fix-ups — Fox gets an SOB pet on its RIGHT (re-fire
+    // target), Deer gets its copy source on its LEFT (swapping itself off
+    // slot 0 if needed).
+    {
+        Team t;
+        for (int i = 0; i < TEAM_SIZE; i++) t.slots[i] = mk(EMPTY_PET, 0, 0);
+        t.slots[0] = mk(16, 3, 4); t.slots[1] = mk(1, 3, 2);
+        t.slots[2] = mk(12, 5, 4);
+        ai_position_team(&t);
+        bool foxOk = t.slots[0].id == 16 && t.slots[1].id == 12;
+        for (int i = 0; i < TEAM_SIZE; i++) t.slots[i] = mk(EMPTY_PET, 0, 0);
+        t.slots[0] = mk(15, 3, 3); t.slots[1] = mk(1, 3, 2);
+        t.slots[2] = mk(10, 3, 3);
+        ai_position_team(&t);
+        int deer = -1;
+        for (int i = 0; i < TEAM_SIZE; i++) if (t.slots[i].id == 15) deer = i;
+        bool deerOk = deer >= 1 && t.slots[deer - 1].id == 10;
+        check("AI positioning: Fox/Deer adjacency", foxOk && deerOk);
+    }
+
     // T57: the sell confirm modal gates the sale — opening it must not sell
     // or pay out; accepting sells the pet and refunds by level.
     {

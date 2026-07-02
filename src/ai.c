@@ -90,14 +90,37 @@ static int ai_find_replacement_target(const AIState* s, uint8_t newPetId) {
 }
 
 static int ai_synergy_bonus(const AIState* s, uint8_t petId) {
-    if (is_buffer(petId)) {
-        for (int i = 0; i < TEAM_SIZE; i++)
-            if (is_summoner(s->team.slots[i].id)) return 6;
-    } else if (is_summoner(petId)) {
-        for (int i = 0; i < TEAM_SIZE; i++)
-            if (is_buffer(s->team.slots[i].id)) return 6;
+    // One pass over the team, then additive pairing bonuses. Magnitudes sit
+    // near the base +6 so taste bends the greedy order, never overrules a
+    // clearly better pet (a T-higher stat pile still wins by raw score).
+    bool teamSummoner = false, teamBuffer = false, teamSob = false;
+    bool teamGator = false, teamAmp = false, teamBigFront = false;
+    int  teamFaintProne = 0;
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        uint8_t id = s->team.slots[i].id;
+        if (id == EMPTY_PET) continue;
+        if (is_summoner(id)) teamSummoner = true;
+        if (is_buffer(id))   teamBuffer = true;
+        if (id == 3 || id == 12)  teamSob = true;      // Hedgehog / Alpaca SOB
+        if (id == 10)             teamGator = true;    // Alligator
+        if (id == 15 || id == 16) teamAmp = true;      // Deer / Fox amplifiers
+        if (id == 4 || id == 6 || id == 7 || id == 13)
+            teamFaintProne++;                          // faint-payoff bodies
+        if (id == 13 || id == 14 || id == 17) teamBigFront = true;
     }
-    return 0;
+    int bonus = 0;
+    if (is_buffer(petId) && teamSummoner)        bonus += 6;
+    else if (is_summoner(petId) && teamBuffer)   bonus += 6;
+    // Amplifiers want an SOB ability next door (Fox re-fires, Deer copies)…
+    if ((petId == 15 || petId == 16) && teamSob) bonus += 8;
+    // …Deer also treasures an Alligator to copy (ally-attack snipe engine).
+    if (petId == 15 && teamGator)                bonus += 6;
+    // The reverse draft: grab the Alpaca nuke when an amplifier is waiting.
+    if (petId == 12 && teamAmp)                  bonus += 8;
+    // Donkey feeds on friendly deaths; Alligator wants long fights.
+    if (petId == 9 && teamFaintProne >= 2)       bonus += 6;
+    if (petId == 10 && teamBigFront)             bonus += 4;
+    return bonus;
 }
 
 // Apply a buy or combine. Stat math mirrors shop_try_buy_pet in shop.c so
@@ -136,14 +159,16 @@ static void ai_refill_shop(uint8_t shop[3], uint8_t turn) {
 // Score a shop pet against the current team. Combines always win; otherwise
 // rank by base stats + tier + synergy bonus. Returns -1 if the pet can't be
 // usefully bought (team full and no combine match).
-static int ai_eval_shop_pet(const AIState* s, uint8_t petId) {
+static int ai_eval_shop_pet(const AIState* s, uint8_t petId, uint8_t turn) {
     if (petId == EMPTY_PET) return -1;
     if (ai_find_combine(s, petId) >= 0) return 1000;
     const PetDef* d = pet_def(petId);
     int base = d ? (d->baseAtk + d->baseHp + d->tier * 3) : 0;
-    if (persona_loves(s->persona, petId)) base += 5;   // taste, not law —
-    // comparable to the +6 summoner/buffer pairing bonus, so personas bend
-    // the greedy pick order without overruling a clearly better pet.
+    // Taste, not law — comparable to the +6 summoner/buffer pairing bonus,
+    // so personas bend the greedy pick order without overruling a clearly
+    // better pet. From turn 6 the taste hardens: late ghosts should commit
+    // to their archetype instead of drifting back to the stat pile.
+    if (persona_loves(s->persona, petId)) base += (turn >= 6) ? 9 : 5;
     if (ai_find_empty(s) >= 0) return base + ai_synergy_bonus(s, petId);
     // Team full — only attractive if a weak L1 can be cheaply swapped out.
     if (ai_find_replacement_target(s, petId) >= 0) return base - 5;
@@ -160,9 +185,28 @@ static void ai_simulate_turn(AIState* s, uint8_t turn) {
 
     int safety = 16;
     while (safety-- > 0 && s->gold >= PET_COST) {
+        // Late persona-seeking reroll: a committed archetype shopper spends
+        // a coin chasing pets it loves instead of settling for the greedy
+        // pick — unless the shop holds a combine (never roll one away).
+        if (turn >= 6 && s->persona != AI_BALANCED && rollsLeft > 0 &&
+            s->gold >= ROLL_COST + PET_COST) {
+            bool worthKeeping = false;
+            for (int i = 0; i < 3; i++) {
+                if (shop[i] == EMPTY_PET) continue;
+                if (persona_loves(s->persona, shop[i]) ||
+                    ai_find_combine(s, shop[i]) >= 0) { worthKeeping = true; break; }
+            }
+            if (!worthKeeping) {
+                s->gold -= ROLL_COST;
+                rollsLeft--;
+                ai_refill_shop(shop, turn);
+                continue;
+            }
+        }
+
         int bestI = -1, bestV = -1;
         for (int i = 0; i < 3; i++) {
-            int v = ai_eval_shop_pet(s, shop[i]);
+            int v = ai_eval_shop_pet(s, shop[i], turn);
             if (v > bestV) { bestV = v; bestI = i; }
         }
         if (bestI >= 0 && bestV >= 0) {
@@ -187,6 +231,89 @@ static void ai_simulate_turn(AIState* s, uint8_t turn) {
             ai_refill_shop(shop, turn);
         } else {
             break;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Positioning pass. The journey sim fills slots in buy order, which reads
+// as a random pile; a competent player lines up: bodies and faint-engines
+// up front (slot 4 fights first), position-agnostic pets mid, snipers and
+// support in the back. 0 = back, 1 = mid, 2 = front, indexed by pet id.
+// ---------------------------------------------------------------------------
+static const uint8_t ROLE_POS[PET_COUNT] = {
+    /* Squirrel */ 0, /* Pup      */ 0, /* Hen    */ 1, /* Hedgehog */ 1,
+    /* Rabbit   */ 2, /* Calf     */ 2, /* Sheep  */ 2, /* Goat     */ 2,
+    /* Haflinger*/ 0, /* Donkey   */ 1, /* Alligator*/ 0, /* Duck   */ 1,
+    /* Alpaca   */ 0, /* Highland */ 2, /* Boar   */ 2, /* Deer     */ 0,
+    /* Fox      */ 0, /* Bear     */ 2,
+};
+
+static void ai_swap_slots(Team* t, int a, int b) {
+    if (a == b) return;
+    PetSlot tmp = t->slots[a];
+    t->slots[a] = t->slots[b];
+    t->slots[b] = tmp;
+}
+
+void ai_position_team(Team* t) {
+    // Compact live pets to slots 0..n-1, preserving buy order.
+    PetSlot live[TEAM_SIZE];
+    int n = 0;
+    for (int i = 0; i < TEAM_SIZE; i++)
+        if (t->slots[i].id != EMPTY_PET) live[n++] = t->slots[i];
+    if (n == 0) return;
+    // Stable insertion sort ascending by role — front roles end at the high
+    // indices (battle.c frontmost_alive: rightmost slot fights first).
+    for (int i = 1; i < n; i++) {
+        PetSlot key = live[i];
+        int j = i - 1;
+        while (j >= 0 && ROLE_POS[live[j].id] > ROLE_POS[key.id]) {
+            live[j + 1] = live[j];
+            j--;
+        }
+        live[j + 1] = key;
+    }
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        if (i < n) { t->slots[i] = live[i]; continue; }
+        t->slots[i].id = EMPTY_PET;
+        t->slots[i].level = 1; t->slots[i].xp = 0;
+        t->slots[i].atk = 0; t->slots[i].hp = 0;
+        t->slots[i].food = EMPTY_FOOD; t->slots[i].flags = 0;
+    }
+
+    // Deterministic adjacency fix-ups (one bounded pass each):
+    // Fox re-fires its RIGHT neighbour's SOB — park Hedgehog/Alpaca there.
+    int fox = -1;
+    for (int i = 0; i < n; i++) if (t->slots[i].id == 16) { fox = i; break; }
+    if (fox >= 0 && n >= 2) {
+        if (fox == n - 1) { ai_swap_slots(t, fox, fox - 1); fox--; }
+        if (t->slots[fox + 1].id != 3 && t->slots[fox + 1].id != 12) {
+            for (int i = 0; i < n; i++) {
+                if (i == fox) continue;
+                if (t->slots[i].id == 3 || t->slots[i].id == 12) {
+                    ai_swap_slots(t, i, fox + 1);
+                    break;
+                }
+            }
+        }
+    }
+    // Deer copies its LEFT neighbour — park an SOB pet or the Alligator
+    // snipe engine there.
+    int deer = -1;
+    for (int i = 0; i < n; i++) if (t->slots[i].id == 15) { deer = i; break; }
+    if (deer >= 0 && n >= 2) {
+        if (deer == 0) { ai_swap_slots(t, deer, deer + 1); deer++; }
+        uint8_t left = t->slots[deer - 1].id;
+        if (left != 3 && left != 12 && left != 10) {
+            for (int i = 0; i < n; i++) {
+                if (i == deer || i == deer - 1) continue;
+                uint8_t id = t->slots[i].id;
+                if (id == 3 || id == 12 || id == 10) {
+                    ai_swap_slots(t, i, deer - 1);
+                    break;
+                }
+            }
         }
     }
 }
@@ -219,6 +346,42 @@ void ai_sim_team(Team* out, uint8_t turn, uint32_t seed) {
     // pet_roll_for_turn drives both).
     for (uint8_t t = 1; t <= turn; t++)
         ai_simulate_turn(&s, t);
+
+    // Late-game food pass: a competent player spends leftover gold on food
+    // for the final-turn team. Approximated with direct stat/flag writes
+    // (Cowbell = flag 0x01, Milk = +2/+2) — deliberately NOT p->food, since
+    // the held-food battle application in game_advance_to_battle only runs
+    // for the player side. Deterministic: fixed targets, no RNG draws.
+    if (turn >= 6) {
+        int front = -1;
+        for (int i = TEAM_SIZE - 1; i >= 0; i--)
+            if (s.team.slots[i].id != EMPTY_PET) { front = i; break; }
+        int fed = 0;
+        if (front >= 0 && s.persona == AI_SNIPER && s.gold >= 4) {
+            s.team.slots[front].flags |= 0x01;   // Cowbell: takes 2 less dmg
+            s.gold -= 4;
+            fed++;
+        }
+        if (s.persona == AI_SWARM || s.persona == AI_BUFFER) {
+            while (fed < 2 && s.gold >= 3) {     // Milk the carry (+2/+2)
+                int best = -1, bestAtk = -1;
+                for (int i = TEAM_SIZE - 1; i >= 0; i--) {
+                    PetSlot* p = &s.team.slots[i];
+                    if (p->id != EMPTY_PET && (int)p->atk > bestAtk) {
+                        bestAtk = p->atk;
+                        best = i;
+                    }
+                }
+                if (best < 0) break;
+                s.team.slots[best].atk = (int16_t)mini(s.team.slots[best].atk + 2, STAT_CAP);
+                s.team.slots[best].hp  = (int16_t)mini(s.team.slots[best].hp + 2, STAT_CAP);
+                s.gold -= 3;
+                fed++;
+            }
+        }
+    }
+
+    ai_position_team(&s.team);
 
     *out = s.team;
     _rng_state = prevState;
