@@ -227,10 +227,10 @@ static void register_debug_menu(void) {
 #if DEBUG_BUILD
 // Pre-baked test teams for fast synergy iteration.
 // Each preset is up to 5 pet IDs (EMPTY_PET = empty slot).
-static const uint8_t DBG_TEAM_DEATH[5]  = {  4,  6,  9, 11,  7 }; // Cricket Sheep Ox Spider Hedgehog
-static const uint8_t DBG_TEAM_SUMMON[5] = {  1,  8,  4,  6, 11 }; // Dog Horse Cricket Sheep Spider
+static const uint8_t DBG_TEAM_DEATH[5]  = {  4,  6,  9, 13,  7 }; // Cricket Sheep Ox Whale Hedgehog
+static const uint8_t DBG_TEAM_SUMMON[5] = {  1,  8,  4,  6,  9 }; // Dog Horse Cricket Sheep Ox
 static const uint8_t DBG_TEAM_BUFF[5]   = {  2,  3, 14, 16, 17 }; // Frog Bee Boar Tiger Dragon
-static const uint8_t DBG_TEAM_DAMAGE[5] = {  0,  7, 10, 12, 17 }; // Mouse Hedgehog Snake Croc Dragon
+static const uint8_t DBG_TEAM_DAMAGE[5] = { 13,  7, 10, 12, 17 }; // Whale Hedgehog Snake Croc Dragon
 static const uint8_t DBG_TEAM_COPY[5]   = { 15, 16,  4,  6,  9 }; // Parrot Tiger Cricket Sheep Ox
 
 static void debug_force_team(int presetIdx) {
@@ -295,6 +295,8 @@ void game_start_run(void)
     game.selectedTeamSlot = 0xFF;
     game.pendingFoodSlot = 0xFF;
     game.confirmKind = CONFIRM_NONE;
+    game.bankedGold = 0;
+    game.freeFoodCharges = 0;
     game.crankShiftAccum = 0;
     game.cursorShown = false;
     game.shopRollAnim = 0;

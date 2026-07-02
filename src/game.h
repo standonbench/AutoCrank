@@ -320,6 +320,11 @@ typedef struct {
     uint8_t  confirmKind;        // ConfirmKind — active shop confirm modal
     uint8_t  confirmSlot;        // team slot the CONFIRM_SELL modal is about
 
+    // Economy pets — transient, deliberately NOT saved (quit-and-resume
+    // mid-turn forfeits them; not worth a save-format bump).
+    uint8_t  bankedGold;         // Duck: gold banked for next turn (cap 6)
+    uint8_t  freeFoodCharges;    // Squirrel: free food buys left this turn
+                                 // (0xFF = every food free this turn)
 
     // battle
     BattleState battle;

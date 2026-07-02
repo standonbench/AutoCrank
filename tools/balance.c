@@ -190,18 +190,18 @@ static void balance_pets(void) {
 // so their decks are positioned explicitly in supportive_team().
 // ---------------------------------------------------------------------------
 static const int8_t PARTNERS[PET_COUNT][4] = {
-    /*0  Squirrel faint-dmg */ {  7, 13, 14, 12 },
-    /*1  Pup on-summon buff */ {  6,  4, 11,  9 },   // summoners + faint payoff
+    /*0  Squirrel buy(shop) */ { 14, 13, 12,  7 },   // out-of-combat value
+    /*1  Pup on-summon buff */ {  6,  4,  9, 14 },   // summoners + faint payoff
     /*2  Hen EOT(shop)      */ { 14, 13, 12,  7 },   // out-of-combat value
-    /*3  Hedgehog SOB +atk  */ {  0,  7,  4, 14 },   // wide team to buff
+    /*3  Hedgehog SOB +atk  */ { 13,  7,  4, 14 },   // wide team to buff
     /*4  Rabbit summoner    */ {  1,  8,  9, 14 },   // buffers + faint payoff
     /*5  Calf buy(shop)     */ { 14, 13, 12,  7 },   // out-of-combat value
     /*6  Sheep summoner     */ {  1,  8,  9, 14 },
-    /*7  Goat faint-AoE     */ {  0, 13, 14, 12 },
-    /*8  Haflinger on-summon*/ {  6,  4, 11,  9 },
-    /*9  Donkey on-faint    */ {  6,  4,  0,  7 },   // faint-prone allies
+    /*7  Goat faint-AoE     */ { 17, 13, 14, 12 },
+    /*8  Haflinger on-summon*/ {  6,  4,  1,  9 },
+    /*9  Donkey on-faint    */ {  6,  4, 13,  7 },   // faint-prone allies
     /*10 Alligator on-atk   */ { 14, 12, 13, 17 },   // many attackers
-    /*11 Duck summoner      */ {  1,  8,  9, 14 },
+    /*11 Duck EOT(shop)     */ { 14, 13, 12,  7 },   // out-of-combat value
     /*12 Alpaca SOB-snipe   */ { 15, 16, 13, 14 },   // copy/re-fire amplify
     /*13 Highland faint-AoE */ { 14, 12,  7, 17 },
     /*14 Boar before-atk    */ { 13, 12, 17,  7 },
@@ -212,9 +212,11 @@ static const int8_t PARTNERS[PET_COUNT][4] = {
 // Pets whose value accrues in the SHOP (gold, or permanent stat growth from
 // buy/EOT triggers writing back to the live team) — their L1-base-stat combat
 // score here is an artifact, not a verdict. Pup(1)/Haflinger(8) grow off
-// every fresh shop buy via FRIEND_SUMMONED; Hen(2) compounds at end of turn.
+// every fresh shop buy via FRIEND_SUMMONED; Hen(2) compounds at end of turn;
+// Squirrel(0) frees food gold, Duck(11) banks gold — pure economy pieces.
 static int is_shop_phase(uint8_t id) {
-    return id == 1 || id == 2 || id == 5 || id == 8 || id == 17;
+    return id == 0 || id == 1 || id == 2 || id == 5 || id == 8 ||
+           id == 11 || id == 17;
 }
 
 static void put(Team* t, int slot, uint8_t id) {

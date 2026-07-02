@@ -37,7 +37,7 @@ Playdate: ARM Cortex-M7, 400×240, 1-bit B/W, 30fps.
 | `src/names.c/.h` | Team-name word pools (`team_name_str`) |
 | `src/save.c` | Versioned save (V4 = lifetime stats + run resume + names + hall of fame) |
 | `src/sound.c` | Synth SFX (implemented). `sfx_attack` is the combat-hit thud |
-| `src/selftest.c` | 64-case mechanics self-test (Title→TEST, or `tools/runtests.sh`) |
+| `src/selftest.c` | 76-case mechanics self-test (Title→TEST, or `tools/runtests.sh`) |
 | `src/mathutil.h` | XORShift RNG, clamp helpers |
 | `src/debug.h` | DLOG/ASSERT (off in release) |
 | `tools/hosttest.c` | Host harness: stub `pd` + `main` to run selftest_run() natively |
@@ -81,10 +81,14 @@ separate `fx_hash` and the playback path NEVER touches the sim `_rng_state` (det
 - A (in battle): hold to floor speed at 4× (does NOT skip to result)
 
 ## SAP-derived numbers
-- Starting gold: 10 per turn
+- Starting gold: 10 per turn (+ Duck's banked gold, `game.bankedGold`, cap +6)
 - Pet cost: 3. Food costs vary: Cheese 1, Hay/Salt 2, Edelweiss/Milk 3, Cowbell 4
+  (Squirrel's stash `game.freeFoodCharges` makes buys free; both economy
+  fields are transient — deliberately NOT saved, reset at turn boundaries)
 - Roll cost: 1
-- Sell refund: 1 + (level - 1); Calf adds a +level sell bonus (TRIG_SELL)
+- Sell refund: 1 + (level - 1); Calf adds a +level sell bonus (TRIG_SELL).
+  B on a team pet opens a confirm modal (`game.confirmKind`, A sells / B keeps);
+  End Turn with gold >= 1 opens a "gold left" confirm the same way
 - Combine: 1 XP per duplicate buy. L2 needs 2 XP, L3 needs 5 cumulative
 - Team: 5 slots, attack right-to-left
 - Tier UNLOCK: T1 turn 1, T2 turn 3, T3 turn 5 — but shop rolls are
@@ -105,11 +109,17 @@ T3: Alpaca, Highland, Boar, Deer, Fox, Bear
 
 **Name-mapping gotcha:** display names in `PETS[]` differ from the handler
 function names, which keep the original prototype names — e.g.
-`pet_mouse_faint` = Squirrel, `pet_dog_summon` = Pup, `pet_croc_sob` = Alpaca,
+`pet_mouse_buy` = Squirrel, `pet_dog_summon` = Pup, `pet_croc_sob` = Alpaca,
 `pet_whale_faint` = Highland, `pet_tiger_sob` = Fox, `pet_parrot_sob` = Deer,
-`pet_dragon_buy` = Bear, `pet_cow_sell` = Calf, `pet_boar_clash` = Boar.
+`pet_dragon_buy` = Bear, `pet_cow_sell` = Calf, `pet_boar_clash` = Boar,
+`pet_goose_eot` = Duck.
 Some `pets.c` comments use yet a third set (Marmot/Bernard/Ibex/Reine/Bull).
 Same pets — do not rename to "fix" them.
+
+**Economy pets:** Squirrel (buy → free food this turn) and Duck (end of turn →
+bank gold for tomorrow) are pure shop-value pets; their state lives in
+transient `Game` fields, never in `Shop`/`PetSlot` (those are saved verbatim).
+
 **Deer copy:** `pet_parrot_sob` records neighbours into a battle-scoped table
 (`g_copiedPet` in pets.c); `trig_drain` fires copied handlers on their real
 trigger kinds via `pets_fire_copied` (SOB copies still run directly at SOB).

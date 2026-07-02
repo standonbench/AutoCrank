@@ -18,10 +18,10 @@
 // Hardcoded synergy categories — kept in sync with PETS[] in pets.c.
 // Summoners benefit from a buffer behind them and vice versa, so the AI's
 // shop evaluator gives that pairing a small value bump.
-//   Summoners (faint-spawn):  Hopper (4), Sheep (6), Goose (11)
+//   Summoners (faint-spawn):  Hopper (4), Sheep (6)
 //   Buffers   (on-summon/atk/faint): Pup (1), Haflinger (8), Ox (9), Adder (10)
 static bool is_summoner(uint8_t id) {
-    return id == 4 || id == 6 || id == 11;
+    return id == 4 || id == 6;
 }
 static bool is_buffer(uint8_t id) {
     return id == 1 || id == 8 || id == 9 || id == 10;
@@ -32,21 +32,21 @@ static bool is_buffer(uint8_t id) {
 // drafts the snipe package, the next goes wide on buffs — late opponents read
 // as archetypes you can scout and answer. BALANCED keeps pure-greedy in the
 // rotation (and is forced before turn 4: tiny teams shouldn't go off-meta).
-//   SWARM : Pup, Rabbit, Sheep, Haflinger, Donkey, Duck
-//   SNIPER: Squirrel, Goat, Alligator, Alpaca, Highland, Deer, Fox
-//   BUFFER: Hen, Hedgehog, Calf, Boar, Bear
+//   SWARM : Pup, Rabbit, Sheep, Haflinger, Donkey
+//   SNIPER: Goat, Alligator, Alpaca, Highland, Deer, Fox
+//   BUFFER: Hen, Hedgehog, Calf, Duck, Boar, Bear (the economy/shop-value set)
 enum { AI_BALANCED = 0, AI_SWARM = 1, AI_SNIPER = 2, AI_BUFFER = 3 };
 
 static bool persona_loves(uint8_t persona, uint8_t id) {
     switch (persona) {
         case AI_SWARM:
-            return id == 1 || id == 4 || id == 6 || id == 8 || id == 9 ||
-                   id == 11;
+            return id == 1 || id == 4 || id == 6 || id == 8 || id == 9;
         case AI_SNIPER:
-            return id == 0 || id == 7 || id == 10 || id == 12 || id == 13 ||
+            return id == 7 || id == 10 || id == 12 || id == 13 ||
                    id == 15 || id == 16;
         case AI_BUFFER:
-            return id == 2 || id == 3 || id == 5 || id == 14 || id == 17;
+            return id == 2 || id == 3 || id == 5 || id == 11 || id == 14 ||
+                   id == 17;
         default:
             return false;
     }
@@ -56,6 +56,7 @@ typedef struct {
     Team    team;
     int16_t gold;
     uint8_t persona;
+    uint8_t bank;     // Duck economy: gold banked at end of the previous turn
 } AIState;
 
 static int ai_find_combine(const AIState* s, uint8_t petId) {
@@ -178,7 +179,8 @@ static int ai_eval_shop_pet(const AIState* s, uint8_t petId, uint8_t turn) {
 // One simulated shop turn: fresh 10g, buy until nothing useful remains,
 // then roll a few times to chase combines before ending.
 static void ai_simulate_turn(AIState* s, uint8_t turn) {
-    s->gold = STARTING_GOLD;
+    s->gold = (int16_t)(STARTING_GOLD + s->bank);
+    s->bank = 0;
     uint8_t shop[3];
     ai_refill_shop(shop, turn);
     int rollsLeft = 3;
@@ -232,6 +234,14 @@ static void ai_simulate_turn(AIState* s, uint8_t turn) {
         } else {
             break;
         }
+    }
+
+    // End-of-turn banking (mirrors pet_goose_eot): each Duck lays away its
+    // level in gold for next turn's shop, capped like the real handler.
+    for (int i = 0; i < TEAM_SIZE; i++) {
+        const PetSlot* p = &s->team.slots[i];
+        if (p->id == 11)
+            s->bank = (uint8_t)mini(s->bank + p->level, 6);
     }
 }
 
@@ -337,6 +347,7 @@ void ai_sim_team(Team* out, uint8_t turn, uint32_t seed) {
         s.team.slots[i].flags = 0;
     }
     s.gold = 0;
+    s.bank = 0;
     // Persona bits sit above the low bits rng_range consumes first, and the
     // whole derivation is a pure function of (seed, turn) — deterministic,
     // resume-safe, no save-format change.

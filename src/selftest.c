@@ -96,16 +96,25 @@ void selftest_run(void) {
         check("Cricket faint spawn", log_has(BEV_SPAWN));
     }
 
-    // T4: Mouse faint deals 1 to a random enemy — kills the last enemy,
-    // turning a loss into a draw.
+    // T4: Squirrel stash — buying the Squirrel itself makes the next food
+    // purchase this turn free (the SAP-cow economy analogue).
     {
-        PetSlot p[] = { mk(0, 1, 1) };
-        PetSlot e[] = { mk(0, 1, 2) };
-        check("Mouse faint damage", run_battle(p, 1, e, 1) == 2);
+        clear_team(&game.player);
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.freeFoodCharges = 0;
+        game.shop.pets[0] = 0;                       // Squirrel
+        game.shop.foods[0] = 0;                      // Hay (2g)
+        game.shop.gold = 10;
+        shop_try_buy_pet(0, 0);                      // -3g, stash charge set
+        bool charged = game.freeFoodCharges == 1 && game.shop.gold == 7;
+        shop_try_buy_food(0, 0);                     // free — gold unchanged
+        check("Squirrel stash: next food free",
+              charged && game.shop.gold == 7 && game.freeFoodCharges == 0);
     }
 
     // T5: Crocodile start-of-battle deals 8 to the last enemy (kills it pre-combat).
-    // Croc has enough HP to shrug off the dying Mouse's faint-revenge.
     {
         PetSlot p[] = { mk(12, 1, 5) };
         PetSlot e[] = { mk(0, 1, 8) };
@@ -199,19 +208,21 @@ void selftest_run(void) {
         check("Haflinger summon buff +2", game.player.slots[1].atk == 4);
     }
 
-    // T14: Spider faint summons a Tier-1 pet (BEV_SPAWN of a T1 id).
+    // T14: Duck (Goose) banks gold at end of turn — the next shop opens at
+    // 10 + level, and the bank drains once the Duck is gone.
     {
-        PetSlot p[] = { mk(11, 1, 1) };
-        PetSlot e[] = { mk(0, 50, 50) };
-        run_battle(p, 1, e, 1);
-        bool t1spawn = false;
-        for (int i = 0; i < game.battleLogLen; i++) {
-            if (game.battleLog[i].kind == BEV_SPAWN) {
-                const PetDef* d = pet_def(game.battleLog[i].data);
-                if (d && d->tier == 1) t1spawn = true;
-            }
-        }
-        check("Spider faint summons T1", t1spawn);
+        clear_team(&game.player);
+        game.player.slots[0] = mkL(11, 3, 4, 2);     // L2 Duck banks +2g
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.bankedGold = 0;
+        shop_end_turn_advance();
+        bool banked = game.shop.gold == STARTING_GOLD + 2;
+        clear_team(&game.player);                    // Duck gone next turn
+        shop_end_turn_advance();
+        check("Goose banks +2g for next turn",
+              banked && game.shop.gold == STARTING_GOLD);
     }
 
     // T15: Dragon — buying a T1 pet gives every ally +1/+1.
@@ -345,16 +356,26 @@ void selftest_run(void) {
     // scenario where the new behavior is the *only* explanation.
     // =======================================================================
 
-    // T26: Marmot L3 fires 2 ability events at 4 dmg each.
+    // T26: Marmot L3 stash — every food this turn is free (0xFF sentinel)
+    // and buys don't consume it. Trigger driven directly (T4 covers the
+    // real shop-buy path at L1).
     {
-        PetSlot p[] = { mkL(0, 0, 1, 3) };           // L3 Marmot, no atk
-        PetSlot e[] = { mk(0, 10, 10), mk(0, 10, 10) };
-        run_battle(p, 1, e, 2);
-        int n = 0;
-        for (int i = 0; i < game.battleLogLen; i++)
-            if (game.battleLog[i].kind == BEV_ABILITY &&
-                game.battleLog[i].value == 4) n++;
-        check("Marmot L3: 2 x 4 dmg events", n == 2);
+        clear_team(&game.player);
+        game.player.slots[0] = mkL(0, 2, 2, 3);      // L3 Squirrel on team
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.freeFoodCharges = 0;
+        game.shop.foods[0] = 0;                      // Hay (2g)
+        game.shop.foods[1] = 3;                      // Cowbell (4g)
+        game.shop.gold = 10;
+        trig_push(TRIG_BUY, 0, 0, 0, 1);             // "the Squirrel was bought"
+        trig_shop_drain();
+        bool all = game.freeFoodCharges == 0xFF;
+        shop_try_buy_food(0, 0);
+        shop_try_buy_food(1, 0);
+        check("Marmot L3: all foods free this turn",
+              all && game.shop.gold == 10 && game.freeFoodCharges == 0xFF);
     }
 
     // T27: Pup L3 buffs SELF +2/+2 AND the just-summoned ally +1/+1.
@@ -478,8 +499,8 @@ void selftest_run(void) {
         PetSlot p[] = { mk(0, 0, 10), mkL(7, 0, 1, 3) };  // Marmot + L3 Goat
         PetSlot e[] = { mk(0, 1, 4), mk(0, 1, 4) };
         run_battle(p, 2, e, 2);
-        check("Goat L3: Marmot ends at 2 hp (friendly+faint)",
-              game.battle.teams[0].slots[0].hp == 2);
+        check("Goat L3: friendly splash costs Marmot 2 hp",
+              game.battle.teams[0].slots[0].hp == 8);
     }
 
     // T35: Adder L3 fires 2 ability events per ally attack. Needs two alive
@@ -714,34 +735,46 @@ void selftest_run(void) {
               game.shop.pets[0] == 12 && (game.shop.frozenPets & 0x1));
     }
 
-    // T_Goose_L3: Goose L3 spawns at 6/6 (was 3/3 at L1) from T1-or-T2 pool.
+    // T_Goose_L3: the bank caps at +6g — three L3 Geese can't push the next
+    // shop past 16g.
     {
-        PetSlot p[] = { mkL(11, 0, 1, 3) };          // L3 Goose, dies on clash
-        PetSlot e[] = { mk(0, 5, 5) };
-        run_battle(p, 1, e, 1);
-        int spawned6 = 0;
-        for (int i = 0; i < game.battleLogLen; i++) {
-            if (game.battleLog[i].kind == BEV_SPAWN) {
-                int a = game.battleLog[i].value & 0xFF;
-                int h = (game.battleLog[i].value >> 8) & 0xFF;
-                if (a == 6 && h == 6) spawned6++;
-            }
-        }
-        check("Goose L3: spawn at 6/6", spawned6 >= 1);
+        clear_team(&game.player);
+        game.player.slots[0] = mkL(11, 3, 4, 3);
+        game.player.slots[1] = mkL(11, 3, 4, 3);
+        game.player.slots[2] = mkL(11, 3, 4, 3);
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.bankedGold = 0;
+        shop_end_turn_advance();
+        check("Goose bank caps at +6g", game.shop.gold == STARTING_GOLD + 6);
     }
 
-    // T_Mouse_L3_Fizzle: Mouse L3 hits two DIFFERENT enemies (without
-    // replacement); with only one enemy alive the second hit fizzles —
-    // exactly one 4-dmg ability event.
+    // T_Marmot_Charges: repeat L1 Squirrel buys stack stash charges, one
+    // consumed per food.
     {
-        PetSlot p[] = { mkL(0, 0, 1, 3) };           // L3 Mouse, dies on clash
-        PetSlot e[] = { mk(1, 1, 100) };             // lone sturdy Pup
-        run_battle(p, 1, e, 1);
-        int hits4 = 0;
-        for (int i = 0; i < game.battleLogLen; i++)
-            if (game.battleLog[i].kind == BEV_ABILITY &&
-                game.battleLog[i].value == 4) hits4++;
-        check("Mouse L3: 2nd hit fizzles vs 1 enemy", hits4 == 1);
+        clear_team(&game.player);
+        game.player.slots[0] = mk(0, 2, 2);          // L1 Squirrel on team
+        game.freeFoodCharges = 0;
+        trig_push(TRIG_BUY, 0, 0, 0, 1);             // bought once…
+        trig_push(TRIG_BUY, 0, 0, 0, 1);             // …and a duplicate
+        trig_shop_drain();
+        check("Marmot stash: charges accumulate", game.freeFoodCharges == 2);
+    }
+
+    // T_TierGap: tier identity guard — mean base-stat totals must step up by
+    // at least 1.5 per tier so a higher-tier pickup reads as a power spike.
+    {
+        int sum[4] = { 0, 0, 0, 0 }, cnt[4] = { 0, 0, 0, 0 };
+        for (int i = 0; i < PET_COUNT; i++) {
+            const PetDef* d = pet_def((uint8_t)i);
+            sum[d->tier] += d->baseAtk + d->baseHp;
+            cnt[d->tier]++;
+        }
+        int m1 = sum[1] * 10 / cnt[1];               // fixed-point x10
+        int m2 = sum[2] * 10 / cnt[2];
+        int m3 = sum[3] * 10 / cnt[3];
+        check("Tier stat gap >= 1.5 per tier", m2 - m1 >= 15 && m3 - m2 >= 15);
     }
 
     // T_Edelweiss_L2: the Bee Buddy scales with the HOLDER's level —

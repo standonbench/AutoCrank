@@ -125,21 +125,25 @@ bool shop_try_buy_food(uint8_t shopSlot, uint8_t teamSlot) {
     uint8_t foodId = game.shop.foods[shopSlot];
     if (foodId == EMPTY_FOOD) return false;
     int cost = FOODS[foodId].cost;
+    if (game.freeFoodCharges > 0) cost = 0;    // Squirrel's stash covers it
     if (game.shop.gold < cost) return false;
 
     if (FOODS[foodId].needsTarget) {
         if (teamSlot >= TEAM_SIZE) return false;
         if (game.player.slots[teamSlot].id == EMPTY_PET) return false;
     }
+    if (game.freeFoodCharges > 0 && game.freeFoodCharges != 0xFF)
+        game.freeFoodCharges--;                // consume only on a real buy
     if (FOODS[foodId].apply) FOODS[foodId].apply(&game.player, teamSlot);
     game.shop.foods[shopSlot] = EMPTY_FOOD;
     game.shop.frozenFoods &= (uint8_t)~(1 << shopSlot);  // freeze clears on buy
     game.shop.gold -= cost;
-    gold_fx(-cost);
+    if (cost > 0) gold_fx(-cost);
     sfx_buy();
     {
         char buf[8];
-        snprintf(buf, sizeof(buf), "-%dg", cost);
+        if (cost > 0) snprintf(buf, sizeof(buf), "-%dg", cost);
+        else          snprintf(buf, sizeof(buf), "free!");
         shop_popup_text(FOOD_COL_X[shopSlot], 84, buf);
     }
     return true;
@@ -221,11 +225,15 @@ void shop_toggle_freeze_food(uint8_t shopSlot) {
 
 void shop_end_turn_advance(void) {
     // One global end-of-turn event — the dispatcher fans it out to every pet.
+    // Duck's banker fires in this drain, so bankedGold is set and consumed
+    // within this one call (never persisted).
     trig_push(TRIG_END_OF_TURN, 0, 0, 0, 0);
     trig_shop_drain();
 
     game.turn++;
-    game.shop.gold = STARTING_GOLD;
+    game.shop.gold = (int16_t)(STARTING_GOLD + game.bankedGold);
+    game.bankedGold = 0;
+    game.freeFoodCharges = 0;    // Squirrel's stash empties with the turn
     // Freeze flags persist into the next turn — that's the whole point. The
     // shop_refill() call below skips frozen slots, so a frozen pet/food
     // carries over until the player buys it (which clears its freeze bit)

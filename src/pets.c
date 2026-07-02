@@ -4,7 +4,7 @@
 //   pet_<name>_<trigger>
 // Each handler runs once per matching trigger event for the pet that owns it.
 
-static void pet_mouse_faint     (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
+static void pet_mouse_buy       (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_dog_summon      (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_frog_eot        (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_bee_sob         (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
@@ -16,7 +16,7 @@ static void pet_hedgehog_faint  (BattleState* bs, uint8_t side, uint8_t slot, Tr
 static void pet_horse_summon    (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_ox_friendfaint  (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_snake_friendatk (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
-static void pet_spider_faint    (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
+static void pet_goose_eot       (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 
 static void pet_croc_sob        (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
 static void pet_boar_clash      (BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev);
@@ -62,10 +62,10 @@ static void food_milk_apply         (Team* team, uint8_t targetSlot);
 const PetDef PETS[PET_COUNT] = {
     // Tier 1 — small alpine & young farm animals
     [0]  = { "Squirrel",  2, 2, 1,  0,
-        { "Faint: 3 dmg to a random enemy.",
-          "Faint: 4 dmg to a random enemy.",
-          "Faint: 4 dmg to two different enemies." },
-        { H_FAINT  pet_mouse_faint } },
+        { "Buy: next food this turn is free.",
+          "Buy: next 2 foods this turn are free.",
+          "Buy: all foods free this turn." },
+        { H_BUY    pet_mouse_buy } },
     [1]  = { "Pup",       3, 2, 1,  1,
         { "Ally summoned: gain +1/+1.",
           "Ally summoned: gain +2/+2.",
@@ -97,7 +97,7 @@ const PetDef PETS[PET_COUNT] = {
           "Faint: spawn two 4/4 Haflingers.",
           "Faint: spawn two 6/6 Haflingers." },
         { H_FAINT  pet_sheep_faint } },
-    [7]  = { "Goat",      3, 3, 2,  7,   // goat
+    [7]  = { "Goat",      3, 4, 2,  7,   // goat
         { "Faint: 2 dmg to all enemies.",
           "Faint: 3 dmg to all enemies.",
           "Faint: 4 dmg enemies, 2 dmg friends." },
@@ -107,23 +107,23 @@ const PetDef PETS[PET_COUNT] = {
           "Ally summoned: give it +3/+2.",
           "Ally summoned: give it +3/+3." },
         { H_SUMMON pet_horse_summon } },
-    [9]  = { "Donkey",    2, 5, 2,  9,
+    [9]  = { "Donkey",    3, 5, 2,  9,
         { "Ally faints: gain +2 atk.",
           "Ally faints: gain +2/+1.",
           "Ally faints: +3/+1 and gain Cowbell." },
         { H_FAINTFRD pet_ox_friendfaint } },
-    [10] = { "Alligator", 3, 3, 2, 10,
+    [10] = { "Alligator", 3, 4, 2, 10,
         { "Ally attacks: 3 dmg to a random enemy.",
           "Ally attacks: 5 dmg to a random enemy.",
           "Ally attacks: 5 dmg to two enemies." },
         { H_FRDATK pet_snake_friendatk } },
-    [11] = { "Duck",      3, 3, 2, 11,
-        { "Faint: spawn a random T1 (3/3).",
-          "Faint: spawn a random T1 (5/5).",
-          "Faint: spawn a random T1/T2 (6/6)." },
-        { H_FAINT  pet_spider_faint } },
+    [11] = { "Duck",      3, 4, 2, 11,
+        { "End of turn: bank +1g for tomorrow.",
+          "End of turn: bank +2g for tomorrow.",
+          "End of turn: bank +3g for tomorrow." },
+        { H_EOT    pet_goose_eot } },
     // Tier 3 — champions of the alp
-    [12] = { "Alpaca",    5, 4, 3, 12,
+    [12] = { "Alpaca",    6, 5, 3, 12,
         { "Battle start: 8 dmg to last enemy.",
           "Battle start: 12 dmg to last enemy.",
           "Battle start: 15 dmg to the last enemy." },
@@ -133,17 +133,17 @@ const PetDef PETS[PET_COUNT] = {
           "Faint: 8 dmg to a random enemy.",
           "Faint: 8 dmg to all enemies." },
         { H_FAINT  pet_whale_faint } },
-    [14] = { "Boar",      5, 6, 3, 14,   // pig (wild pig stand-in)
+    [14] = { "Boar",      6, 6, 3, 14,   // pig (wild pig stand-in)
         { "Each clash: gain +1/+1.",
           "Each clash: gain +2/+1.",
           "Each clash: gain +2/+2." },
         { H_FRDATK pet_boar_clash } },
-    [15] = { "Deer",      3, 3, 3, 15,
+    [15] = { "Deer",      4, 4, 3, 15,
         { "Battle start: copy left ally's ability.",
           "Battle start: copy left at +1 power.",
           "Battle start: copy both neighbors." },
         { H_SOB    pet_parrot_sob } },
-    [16] = { "Fox",       3, 4, 3, 16,
+    [16] = { "Fox",       4, 5, 3, 16,
         { "Battle start: re-fire right ally.",
           "Battle start: re-fire right ally twice.",
           "Battle start: re-fire right ally twice." },
@@ -298,35 +298,19 @@ static void summon_pet_in_slot(BattleState* bs, uint8_t side, uint8_t slot,
 // ---------------------------------------------------------------------------
 // Tier 1 pet abilities
 // ---------------------------------------------------------------------------
-static void pet_mouse_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Fires only on our OWN faint. L1: 3 dmg / 1 target. L2: 4 dmg / 1 target.
-    // L3: 4 dmg / 2 DIFFERENT targets — without replacement, so the hits
-    // always spread (the old with-replacement roll double-tapped one pet
-    // ~40% of the time, making L3 feel like a coin flip). With one enemy
-    // left the second hit fizzles.
+static void pet_mouse_buy(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Marmot stashes a snack when IT is bought: food purchases this turn are
+    // free — L1: the next one, L2: the next two, L3: every food this turn
+    // (0xFF sentinel). Charges from repeat buys accumulate; the stash empties
+    // at end of turn (shop_end_turn_advance). Shop-time only: TRIG_BUY never
+    // fires in battle, and the freed gold is the whole ability, so the
+    // economy build finally has its SAP-cow analogue.
     if (ev->side != side || ev->srcSlot != slot) return;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    int dmg, targets;
-    switch (lvl) {
-        case 1:  dmg = 3; targets = 1; break;
-        case 2:  dmg = 4; targets = 1; break;
-        default: dmg = 4; targets = 2; break;
-    }
-    int targetSide = side ^ 1;
-    int alive[TEAM_SIZE], nAlive = 0;
-    for (int i = 0; i < TEAM_SIZE; i++) {
-        PetSlot* ep = &bs->teams[targetSide].slots[i];
-        if (ep->id != EMPTY_PET && ep->hp > 0) alive[nAlive++] = i;
-    }
-    if (targets > nAlive) targets = nAlive;
-    for (int n = 0; n < targets; n++) {
-        int k = rng_range(0, nAlive - 1);
-        int t = alive[k];
-        alive[k] = alive[--nAlive];          // draw without replacement
-        // ABILITY logs the visual cue (glow at source) FIRST, then DAMAGE
-        // applies — so cause-and-effect reads left-to-right at playback.
-        battle_log_push(BEV_ABILITY, side, slot, (int16_t)dmg, (uint8_t)t);
-        deal_damage_to_slot(bs, (uint8_t)targetSide, t, dmg);
+    if (lvl >= 3) {
+        game.freeFoodCharges = 0xFF;
+    } else if (game.freeFoodCharges != 0xFF) {
+        game.freeFoodCharges = (uint8_t)mini(game.freeFoodCharges + lvl, 9);
     }
 }
 
@@ -540,22 +524,14 @@ static void pet_snake_friendatk(BattleState* bs, uint8_t side, uint8_t slot, Tri
     }
 }
 
-static void pet_spider_faint(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
-    // Goose: summon a random pet from a level-gated pool. The lottery body
-    // scales so the L3 gamble isn't strictly worse than Sheep's sure thing —
-    // the spawned pet keeps its own faint chain, which is the fun part.
-    // L1: T1 at 3/3. L2: T1 at 5/5. L3: T1 or T2 at 6/6.
-    if (ev->side != side || ev->srcSlot != slot) return;
+static void pet_goose_eot(BattleState* bs, uint8_t side, uint8_t slot, TriggerEvent* ev) {
+    // Goose lays a golden egg at end of turn: bank +1g/+2g/+3g (by level)
+    // that joins tomorrow's 10 (shop_end_turn_advance pays it out and zeroes
+    // the bank in the same call, so no save-format change). Capped at +6 so
+    // a multi-goose economy can't snowball the shop. The SAP-swan analogue.
+    (void)ev;
     int lvl = (int)bs->teams[side].slots[slot].level;
-    int stat;
-    uint8_t maxTier;
-    switch (lvl) {
-        case 1:  stat = 3; maxTier = 1; break;
-        case 2:  stat = 5; maxTier = 1; break;
-        default: stat = 6; maxTier = 2; break;
-    }
-    uint8_t pid = pet_random_in_tier(maxTier);
-    summon_pet_in_slot(bs, side, slot, pid, (int16_t)stat, (int16_t)stat);
+    game.bankedGold = (uint8_t)mini(game.bankedGold + lvl, 6);
 }
 
 // ---------------------------------------------------------------------------

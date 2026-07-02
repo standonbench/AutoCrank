@@ -808,7 +808,10 @@ void render_shop_screen(void)
         render_food(game.shop.foods[i], foodX[i], shopFeet, false, frz);
         if (game.shop.foods[i] != EMPTY_FOOD) {
             char cb[8];
-            snprintf(cb, sizeof(cb), "%dg", FOODS[game.shop.foods[i]].cost);
+            if (game.freeFoodCharges > 0)      // Squirrel stash: next buy free
+                snprintf(cb, sizeof(cb), "0g");
+            else
+                snprintf(cb, sizeof(cb), "%dg", FOODS[game.shop.foods[i]].cost);
             if (game.fontSmall) pd->graphics->setFont(game.fontSmall);
             pd->graphics->setDrawMode(kDrawModeFillBlack);
             int w = pd->graphics->getTextWidth(game.fontSmall, cb, strlen(cb),
