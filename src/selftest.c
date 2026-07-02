@@ -1002,6 +1002,35 @@ void selftest_run(void) {
         check("Ibex copy is battle-scoped", game.player.slots[0].atk == atkBefore);
     }
 
+    // T57: the sell confirm modal gates the sale — opening it must not sell
+    // or pay out; accepting sells the pet and refunds by level.
+    {
+        clear_team(&game.player);
+        game.player.slots[2] = mkL(1, 3, 2, 2);      // L2 Pup -> refund 2g
+        memset(&game.shop, 0, sizeof(Shop));
+        for (int i = 0; i < MAX_SHOP_PETS; i++) game.shop.pets[i] = EMPTY_PET;
+        for (int i = 0; i < MAX_SHOP_FOOD; i++) game.shop.foods[i] = EMPTY_FOOD;
+        game.shop.gold = 0;
+        shop_confirm_open(CONFIRM_SELL, 2);
+        bool gated = game.player.slots[2].id == 1 && game.shop.gold == 0 &&
+                     game.confirmKind == CONFIRM_SELL;
+        shop_confirm_accept();
+        check("Confirm sell: gated, then refunds on A",
+              gated && game.player.slots[2].id == EMPTY_PET &&
+              game.shop.gold == 2 && game.confirmKind == CONFIRM_NONE);
+    }
+
+    // T58: the battle confirm only triggers with spendable gold. Roll costs
+    // 1 and gold never carries over, so 1g+ prompts and 0g marches straight
+    // to the arena.
+    {
+        game.shop.gold = 1;
+        bool promptAt1 = shop_should_confirm_battle();
+        game.shop.gold = 0;
+        bool quietAt0 = !shop_should_confirm_battle();
+        check("Confirm battle: 1g prompts, 0g doesn't", promptAt1 && quietAt0);
+    }
+
     DLOG("SELFTEST: %d passed, %d failed", g_pass, g_fail);
 }
 

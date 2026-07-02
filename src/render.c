@@ -947,6 +947,12 @@ void render_shop_screen(void)
     }
     else if (c == rollIdx) { hintA = "reroll the market"; }
     else { hintA = "march to battle"; }
+    // Confirm modal owns the hint bar while it's up.
+    if (game.confirmKind == CONFIRM_SELL) {
+        hintA = "sell"; hintB = "keep"; hintX = NULL;
+    } else if (game.confirmKind == CONFIRM_BATTLE) {
+        hintA = "battle anyway"; hintB = "back to the stalls"; hintX = NULL;
+    }
     th_hint_bar(hintA, hintB, hintX);
 
     // --- Destination pointer: a down-chevron over the team column this buy
@@ -971,8 +977,9 @@ void render_shop_screen(void)
         }
     }
 
-    // --- Hover info card (only when the cursor is awake) ---
-    if (game.cursorShown) {
+    // --- Hover info card (only when the cursor is awake; the confirm modal
+    //     suppresses it so the two panels don't stack) ---
+    if (game.cursorShown && game.confirmKind == CONFIRM_NONE) {
         if (c < MAX_SHOP_PETS) {
             uint8_t pid = game.shop.pets[c];
             if (pid != EMPTY_PET) {
@@ -999,6 +1006,29 @@ void render_shop_screen(void)
 
     // --- Floating shop popups (gold deltas, level-up sparkles) ---
     shop_popup_drain();
+
+    // --- Confirm modal (sell / battle-with-gold) — drawn over everything ---
+    if (game.confirmKind != CONFIRM_NONE) {
+        int mx = 100, my = 88, mw = 200, mh = 64;
+        th_panel_dark(mx, my, mw, mh);
+        char l1[48], l2[48];
+        l1[0] = l2[0] = '\0';
+        if (game.confirmKind == CONFIRM_SELL) {
+            PetSlot* p = &game.player.slots[game.confirmSlot];
+            if (p->id != EMPTY_PET) {
+                snprintf(l1, sizeof l1, "Sell %s (L%d)?",
+                         pet_name(p->id), (int)p->level);
+                snprintf(l2, sizeof l2, "returns %dg to the purse",
+                         shop_sell_refund(game.confirmSlot));
+            }
+        } else {
+            snprintf(l1, sizeof l1, "%dg still in the purse!",
+                     (int)game.shop.gold);
+            snprintf(l2, sizeof l2, "the stalls stay open...");
+        }
+        th_text_center(game.fontBold, l1, mx + mw / 2, my + 13, true);
+        th_text_center(game.fontSmall, l2, mx + mw / 2, my + 35, true);
+    }
 
     render_debug_overlay();
 }

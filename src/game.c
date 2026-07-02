@@ -294,6 +294,7 @@ void game_start_run(void)
     game.cursor = 0;
     game.selectedTeamSlot = 0xFF;
     game.pendingFoodSlot = 0xFF;
+    game.confirmKind = CONFIRM_NONE;
     game.crankShiftAccum = 0;
     game.cursorShown = false;
     game.shopRollAnim = 0;
@@ -417,6 +418,7 @@ void game_after_battle(void)
         game.cursorShown = false;
         game.shopRollAnim = 0;
         game.pendingFoodSlot = 0xFF;
+        game.confirmKind = CONFIRM_NONE;
         shop_popup_clear();
         th_wipe_start();
         game.state = STATE_SHOP;
@@ -495,6 +497,35 @@ CombinePreview shop_combine_preview(uint8_t petId) {
     return p;                                     // else dstSlot stays -1: team full
 }
 
+// --- Shop confirm modal -----------------------------------------------------
+// A tiny A/B sub-state (pendingFoodSlot pattern): while confirmKind is set,
+// shop_input swallows everything except A (accept) and B (cancel).
+void shop_confirm_open(uint8_t kind, uint8_t teamSlot) {
+    game.confirmKind = kind;
+    game.confirmSlot = teamSlot;
+}
+
+// Prompt before marching with spendable gold: roll costs 1 and gold doesn't
+// carry over, so any leftover coin can always buy *something*.
+bool shop_should_confirm_battle(void) {
+    return game.shop.gold >= ROLL_COST;
+}
+
+void shop_confirm_accept(void) {
+    uint8_t kind = game.confirmKind;
+    uint8_t slot = game.confirmSlot;
+    game.confirmKind = CONFIRM_NONE;
+    if (kind == CONFIRM_SELL) {
+        shop_try_sell(slot);
+        if (game.selectedTeamSlot == slot) {
+            game.selectedTeamSlot = 0xFF;
+            game.crankShiftAccum = 0;
+        }
+    } else if (kind == CONFIRM_BATTLE) {
+        game_advance_to_battle();
+    }
+}
+
 static void shop_action_a(void) {
     uint8_t c = game.cursor;
     CursorRow r = cursor_row(c);
@@ -546,7 +577,10 @@ static void shop_action_a(void) {
         if (c == CUR_ROLL) {
             shop_try_roll();
         } else if (c == CUR_END_TURN) {
-            game_advance_to_battle();
+            if (shop_should_confirm_battle())
+                shop_confirm_open(CONFIRM_BATTLE, 0);
+            else
+                game_advance_to_battle();
         }
         break;
     }
@@ -565,13 +599,11 @@ static void shop_action_b(void) {
     } else if (r == ROW_SHOP_FOODS) {
         shop_toggle_freeze_food((uint8_t)(c - CUR_SHOP_PET_END));
     } else if (r == ROW_TEAM) {
-        // B sells the team pet under the cursor.
+        // B asks to sell the team pet under the cursor; the confirm modal
+        // completes the sale on A (shop_confirm_accept).
         uint8_t teamSlot = (uint8_t)(game.cursor - CUR_SHOP_FOOD_END);
-        shop_try_sell(teamSlot);
-        if (game.selectedTeamSlot == teamSlot) {
-            game.selectedTeamSlot = 0xFF;
-            game.crankShiftAccum = 0;
-        }
+        if (game.player.slots[teamSlot].id != EMPTY_PET)
+            shop_confirm_open(CONFIRM_SELL, teamSlot);
     }
 }
 
@@ -655,6 +687,15 @@ static void shop_input(PDButtons pressed) {
         if (pressed & dpad) game.cursorShown = true;
         return;
     }
+
+    // Confirm modal swallows all input: A accepts, B cancels, the d-pad and
+    // crank-reorder (below) are ignored until the player answers.
+    if (game.confirmKind != CONFIRM_NONE) {
+        if (pressed & kButtonA)      shop_confirm_accept();
+        else if (pressed & kButtonB) game.confirmKind = CONFIRM_NONE;
+        return;
+    }
+
     shop_navigate(pressed);
     if (pressed & kButtonA) shop_action_a();
     if (pressed & kButtonB) shop_action_b();

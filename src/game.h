@@ -255,6 +255,16 @@ typedef struct {
 extern const FoodDef FOODS[FOOD_COUNT];
 
 // ---------------------------------------------------------------------------
+// Shop confirm modal — a lightweight sub-state (like pendingFoodSlot) that
+// swallows input until the player answers with A (accept) or B (cancel).
+// ---------------------------------------------------------------------------
+typedef enum {
+    CONFIRM_NONE = 0,
+    CONFIRM_SELL,     // "sell this pet?" — confirmSlot = team slot
+    CONFIRM_BATTLE,   // "gold left in the purse — battle anyway?"
+} ConfirmKind;
+
+// ---------------------------------------------------------------------------
 // One Game struct holds everything (CrankSurvivor pattern)
 // ---------------------------------------------------------------------------
 typedef struct {
@@ -307,6 +317,9 @@ typedef struct {
     bool     cursorShown;        // hidden on shop entry; first d-pad reveals it
     uint8_t  pendingFoodSlot;    // shop-slot of a targeted food awaiting a
                                  // team-slot choice (0xFF = no pending pick)
+    uint8_t  confirmKind;        // ConfirmKind — active shop confirm modal
+    uint8_t  confirmSlot;        // team slot the CONFIRM_SELL modal is about
+
 
     // battle
     BattleState battle;
@@ -346,6 +359,11 @@ extern Game game;
 // ---------------------------------------------------------------------------
 
 // game.c
+// Shop confirm modal (game.c) — open/answer the A/B confirm sub-state.
+void shop_confirm_open(uint8_t kind, uint8_t teamSlot);
+void shop_confirm_accept(void);
+bool shop_should_confirm_battle(void);
+
 void game_init(void);
 int  update(void* userdata);
 void game_start_run(void);
@@ -395,6 +413,8 @@ extern const int FOOD_COL_X[2];
 // Shop popup buffer — short floating text & sparks fired on shop actions.
 // Pushed from shop.c, drained by render_shop_screen.
 void shop_popup_text(int cx, int cy, const char* s);
+// Gold returned if this team slot were sold now (level refund + Calf bonus).
+int  shop_sell_refund(uint8_t teamSlot);
 void shop_popup_burst(int cx, int cy);
 void shop_popup_clear(void);
 void render_unit(uint8_t petId, uint8_t level, int16_t atk, int16_t hp,

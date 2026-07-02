@@ -145,6 +145,19 @@ bool shop_try_buy_food(uint8_t shopSlot, uint8_t teamSlot) {
     return true;
 }
 
+// Gold a sale would return. Base refund is 1 + (level - 1); Calf (id 5)
+// adds +level via its TRIG_SELL handler — included here so the confirm
+// modal can quote the true payout (the handler still pays it out).
+int shop_sell_refund(uint8_t teamSlot) {
+    if (teamSlot >= TEAM_SIZE) return 0;
+    PetSlot* p = &game.player.slots[teamSlot];
+    if (p->id == EMPTY_PET) return 0;
+    int refund = 1 + p->level - 1;
+    if (refund < 1) refund = 1;
+    if (p->id == 5) refund += p->level;
+    return refund;
+}
+
 bool shop_try_sell(uint8_t teamSlot) {
     if (teamSlot >= TEAM_SIZE) return false;
     PetSlot* p = &game.player.slots[teamSlot];
