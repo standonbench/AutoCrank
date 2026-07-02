@@ -67,6 +67,12 @@ extern PlaydateAPI* pd;
 #define SETTING_SFX_MUTE  0x01   // sound effects muted via the system menu
 #define SETTING_HELP_SEEN 0x02   // how-to-play has been shown once
 
+// Playtest telemetry: flip to 1 to append one CSV line per battle to
+// runlog.csv in the game's Data folder (Simulator: pull it from there).
+// Zero overhead when off; host tests are safe either way (file stubs
+// return NULL).
+#define RUNLOG_ENABLED 0
+
 // Deep SOB chains (Reine|Ibex|Reine|Ibex|Bernard) can generate hundreds of
 // cascading ABILITY/DAMAGE events. 256 was tight enough to truncate playback
 // on stressed late-game boards; 1024 has 3 KB RAM cost and headroom to spare.

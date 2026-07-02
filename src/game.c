@@ -398,6 +398,30 @@ void game_apply_battle_result(void)
     }
     // Draw: no change
 
+#if RUNLOG_ENABLED
+    // One CSV line per battle: run identity, progress, outcome (0 win /
+    // 1 loss / 2 draw), unspent gold, and the team as id:level pairs.
+    {
+        SDFile* f = pd->file->open("runlog.csv", kFileAppend);
+        if (f) {
+            char line[160];
+            int n = snprintf(line, sizeof line, "%lu,%d,%d,%d,%d,%d",
+                             (unsigned long)game.runSeed, (int)game.turn,
+                             (int)game.wins, (int)game.lives,
+                             (int)game.battleResult, (int)game.shop.gold);
+            for (int i = 0; i < TEAM_SIZE && n < (int)sizeof line; i++) {
+                PetSlot* p = &game.player.slots[i];
+                n += snprintf(line + n, sizeof line - (size_t)n, ",%d:%d",
+                              (p->id == EMPTY_PET) ? -1 : (int)p->id,
+                              (int)p->level);
+            }
+            if (n < (int)sizeof line - 1) line[n++] = '\n';
+            pd->file->write(f, line, (unsigned int)n);
+            pd->file->close(f);
+        }
+    }
+#endif
+
     save_write();
 }
 
