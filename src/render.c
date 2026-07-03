@@ -643,15 +643,27 @@ static void shop_awning(int x0, int x1, int yTop, int yBot, int postFootY) {
     // posts
     GFX_FILL(x0 + 2, yBot, 3, postFootY - yBot, kColorBlack);
     GFX_FILL(x1 - 5, yBot, 3, postFootY - yBot, kColorBlack);
-    // striped canopy
+    // striped canopy — white stripes carry a breath-grey weave so the
+    // canvas reads as cloth, and a dashed stitch seam runs under the ridge
+    // (ink flipped per stripe so it shows on both).
     int stripe = 16, k = 0;
     for (int x = x0; x < x1; x += stripe, k++) {
         int w = mini(stripe, x1 - x);
-        if (k & 1) GFX_FILL(x, yTop, w, yBot - yTop, kColorBlack);
-        else       GFX_FILL(x, yTop, w, yBot - yTop, kColorWhite);
-        // scalloped valance, colour-matched per stripe
+        if (k & 1) {
+            GFX_FILL(x, yTop, w, yBot - yTop, kColorBlack);
+        } else {
+            GFX_FILL(x, yTop, w, yBot - yTop, kColorWhite);
+            th_fill(x, yTop + 2, w, yBot - yTop - 4, TH_PAT_06);
+        }
+        for (int dx = x + 1; dx + 3 <= x + w - 1; dx += 6)
+            GFX_LINE(dx, yTop + 4, dx + 2, yTop + 4, 1,
+                     (k & 1) ? kColorWhite : kColorBlack);
+        // scalloped valance, colour-matched per stripe, with a doubled
+        // lower arc so the hem carries a little weight against the sky
         GFX_ELLIPSE(x, yBot - 5, w, 10, (k & 1) ? kColorBlack : kColorWhite);
         pd->graphics->drawEllipse(x, yBot - 5, w, 10, 1, 90.0f, 270.0f,
+                                  kColorBlack);
+        pd->graphics->drawEllipse(x, yBot - 4, w, 10, 1, 110.0f, 250.0f,
                                   kColorBlack);
     }
     GFX_LINE(x0, yTop, x1, yTop, 2, kColorBlack);
@@ -675,6 +687,24 @@ static void shop_fence(int x0, int x1, int baseY) {
 static void shop_herd_sign(void) {
     GFX_FILL(376, 150, 6, 44, kColorBlack);                      // post
     th_sign_plank(286, 396, 158, "YOUR HERD", false, true);
+}
+
+// Sprinkle static grass tufts + dirt specks over a turf strip — the same
+// ground treatment the battle arena uses. Hashed on x, never on frameCount,
+// so the dressing sits still; units draw afterwards and overlap it cleanly.
+static void turf_dressing(int x0, int w, int y) {
+    for (int i = 0; i < 6; i++) {
+        int gx = x0 + 8 + (i * 97 + 13) % (w - 16);
+        int gy = y + 2 + ((i * 53) % 4);
+        GFX_LINE(gx, gy + 4, gx, gy, 1, kColorBlack);
+        GFX_LINE(gx - 2, gy + 4, gx - 3, gy + 2, 1, kColorBlack);
+        GFX_LINE(gx + 2, gy + 4, gx + 3, gy + 2, 1, kColorBlack);
+    }
+    for (int i = 0; i < 8; i++) {
+        int dx = x0 + 4 + (i * 61 + 37) % (w - 8);
+        int dy = y + 3 + ((i * 29) % 6);
+        GFX_FILL(dx, dy, 2, 1, kColorBlack);
+    }
 }
 
 // Food-stall counter — a plank table the two shop foods stand on.
@@ -706,9 +736,12 @@ void render_shop_screen(void)
     shop_fence(colX[0] - 26, colX[TEAM_SIZE - 1] + 30, teamFeet);
     shop_herd_sign();
 
-    // --- Pasture turf strips under the live rows.
+    // --- Pasture turf strips under the live rows, with a little ground
+    //     character (grass tufts + dirt specks, battle-arena style).
     th_fill(shopColX[0] - 26, shopFeet, shopColX[2] - shopColX[0] + 52, 11, TH_PAT_12);
     th_fill(colX[0] - 26, teamFeet, colX[TEAM_SIZE-1] - colX[0] + 52, 11, TH_PAT_12);
+    turf_dressing(shopColX[0] - 26, shopColX[2] - shopColX[0] + 52, shopFeet);
+    turf_dressing(colX[0] - 26, colX[TEAM_SIZE - 1] - colX[0] + 52, teamFeet);
 
     // --- Shop pets ---
     // On reroll, each unfrozen pet pops in with a 3-phase emergence,

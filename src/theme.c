@@ -197,23 +197,30 @@ void th_chip(int cx, int cy, const char* label, bool inverted) {
 }
 
 void th_plank_button(int x, int y, int w, int h, const char* label, bool sel) {
+    LCDFont* f = game.fontBold;
+    int lw = th_text_w(f, label);
+    int labelX = x + (w - lw) / 2;
     if (sel) {
+        // Solid inverted plank — no inner outline, matching the game's other
+        // inverted chips.
         th_fill(x + 3, y + 3, w, h, TH_PAT_HATCH);
         th_fill_octagon(x, y, w, h, kColorBlack);
-        GFX_RECT(x + 3, y + 3, w - 6, h - 6, kColorWhite);
     } else {
         th_fill(x + 2, y + 2, w, h, TH_PAT_HATCH);
         th_fill_octagon(x, y, w, h, kColorWhite);
         th_line_octagon(x, y, w, h, 2, kColorBlack);
-        // woodgrain + nail heads
-        GFX_LINE(x + 9, y + 4, x + w - 9, y + 4, 1, kColorBlack);
+        // Woodgrain: short dashes flanking the label (a full-width line cut
+        // straight through the text's top row) + nail heads.
+        if (labelX - 6 - (x + 9) >= 5)
+            GFX_LINE(x + 9, y + 4, labelX - 6, y + 4, 1, kColorBlack);
+        if ((x + w - 9) - (labelX + lw + 6) >= 5)
+            GFX_LINE(labelX + lw + 6, y + 4, x + w - 9, y + 4, 1, kColorBlack);
         pd->graphics->drawEllipse(x + 6, y + h / 2 - 2, 4, 4, 1, 0, 360,
                                   kColorBlack);
         pd->graphics->drawEllipse(x + w - 10, y + h / 2 - 2, 4, 4, 1, 0, 360,
                                   kColorBlack);
     }
-    LCDFont* f = game.fontBold;
-    th_text(f, label, x + (w - th_text_w(f, label)) / 2, y + (h - 16) / 2, sel);
+    th_text(f, label, labelX, y + (h - 16) / 2, sel);
 }
 
 void th_button_glyph(int cx, int cy, char ab, bool onBlack) {
