@@ -1,5 +1,5 @@
 name=AutoCrank
 author=Pierre
-description=A pocket-sized autobattler. Stack absurd synergies, win 10 in a row.
+description=Combat des Reines - a pocket autobattler. Draft an alpine herd, stack absurd synergies, win 10 bouts to crown your queen.
 bundleID=com.pierre.autocrank
-imagePath=images
+imagePath=launcher
