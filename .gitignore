@@ -10,3 +10,7 @@ Source/pdex.bin
 tools/out/
 tools/test_output/
 tools/.venv/
+
+# Machine-local session config + python bytecode
+.claude/
+tools/__pycache__/
