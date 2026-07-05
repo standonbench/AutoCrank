@@ -1587,6 +1587,7 @@ static void projectiles_step_and_draw(void) {
         if (e->kind == BEV_ABILITY &&
             ability_first_in_barrage((int)game.battlePlayhead)) {
             projectiles_spawn_barrage((int)game.battlePlayhead);
+            sfx_projectile();             // launch whoosh, once per barrage
         }
         game.barrageSpawnedAt = game.battlePlayhead;
     }
@@ -1626,7 +1627,7 @@ static void projectiles_step_and_draw(void) {
                 // shake. `debrisDone` still latches that one-shot sfx/shake.
                 p->debrisDone = 1;
                 if (impactSfxFrame != game.frameCount) {
-                    sfx_attack();
+                    sfx_attack_hit((int)p->damage);
                     impactSfxFrame = game.frameCount;
                 }
                 battle_shake(2 + (int)p->damage / 4);  // weight scales w/ dmg
@@ -1807,12 +1808,21 @@ void render_battle_screen(void)
             // Clash impact debris removed — the thud + recoil + (on a KO)
             // screen-shake carry the contact now.
             g_lastClashImpactPlayhead = (int)game.battlePlayhead;
-            sfx_attack();                 // melee contact thud
+            // Melee contact thud, weighted by the bigger blow of the trade.
+            {
+                int pD = e->value & 0xFF, eD = (e->value >> 8) & 0xFF;
+                sfx_attack_hit(pD > eD ? pD : eD);
+            }
             // A KO at the front line lands with weight; a survived trade
             // doesn't shake (the thud + debris already read the contact).
+            // The dying pet's faint event is folded into this clash, so its
+            // death boom fires HERE, layered with the thud — battle.c skips
+            // folded faints to keep the explosion on the moment of impact.
             if (clash_kills((int)game.battlePlayhead, 0, pSlot) ||
-                clash_kills((int)game.battlePlayhead, 1, eSlot))
+                clash_kills((int)game.battlePlayhead, 1, eSlot)) {
                 battle_shake(5);
+                sfx_faint();
+            }
         }
     }
 

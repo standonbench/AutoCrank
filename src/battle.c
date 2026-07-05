@@ -423,6 +423,10 @@ int battle_event_window(int playhead) {
 // Playback — animate one event at a time; crank scales speed.
 // Each event animates over its window, then is applied at the window's end.
 // ---------------------------------------------------------------------------
+// Log index of the faint GROUP HEAD whose death boom already played, so the
+// window-entry fire and the fast-forward fallback below can't double up.
+static int g_faintBoomAt = -1;
+
 void battle_playback_step(void) {
     BattleState* bs = &game.battle;
 
@@ -430,6 +434,7 @@ void battle_playback_step(void) {
     if (game.battlePlayhead == 0 && game.battleClock == 0.0f) {
         bs->teams[0] = bs->initial[0];
         bs->teams[1] = bs->initial[1];
+        g_faintBoomAt = -1;
     }
 
     // Crank-driven speed: 1x baseline, scales with rotation rate.
@@ -453,23 +458,57 @@ void battle_playback_step(void) {
 
     // Advance through events whose animation window has fully elapsed.
     bool faintSfxFired = false;
+    bool spawnSfxFired = false;
+    bool buffSfxFired  = false;
     while (game.battlePlayhead < game.battleLogLen) {
         BattleEvent* e = &game.battleLog[game.battlePlayhead];
         float dur = (float)battle_event_window(game.battlePlayhead);
         if (game.battleClock < dur) break;
         game.battleClock -= dur;
         apply_event(bs, e);
-        // Faint whoosh on apply, once per frame — grouped simultaneous
-        // deaths apply in the same iteration and must not stack the SFX.
+        // Event SFX on apply, each latched to once per frame — grouped
+        // simultaneous events (or a cranked-up playback speed) apply many
+        // per iteration and must not stack the same sound.
         // (Combat hits — clash contact + projectile impact — fire
-        // sfx_attack from render.c at the visual moment, since ability
+        // sfx_attack_hit from render.c at the visual moment, since ability
         // DAMAGE events collapse to a zero-length window here. There is
         // no BEV_ATTACK event: the front line trades via BEV_CLASH.)
-        if (e->kind == BEV_FAINT && !faintSfxFired) {
-            sfx_faint();
+        if (e->kind == BEV_FAINT && !faintSfxFired &&
+            !battle_faint_folded((int)game.battlePlayhead)) {
+            // Fast-forward fallback only: at high crank speed a faint window
+            // can elapse inside one frame, so the entry-fire below never saw
+            // it. Folded faints stay silent here — their boom plays at clash
+            // contact in render.c, layered with the thud.
+            int head = faint_group_head((int)game.battlePlayhead);
+            if (head != g_faintBoomAt) {
+                sfx_faint();
+                g_faintBoomAt = head;
+            }
             faintSfxFired = true;
+        } else if (e->kind == BEV_SPAWN && !spawnSfxFired) {
+            sfx_summon();
+            spawnSfxFired = true;
+        } else if (e->kind == BEV_BUFF && !buffSfxFired) {
+            sfx_buff();
+            buffSfxFired = true;
         }
         game.battlePlayhead++;
+    }
+
+    // Death boom fires the moment the fly-off STARTS — when the playhead
+    // parks on an unfolded faint group's window — not when the window
+    // completes. (On-apply timing landed the explosion at the END of the
+    // death animation, audibly late.)
+    if (game.battlePlayhead < game.battleLogLen && !faintSfxFired) {
+        int ph = (int)game.battlePlayhead;
+        if (game.battleLog[ph].kind == BEV_FAINT &&
+            !battle_faint_folded(ph)) {
+            int head = faint_group_head(ph);
+            if (head != g_faintBoomAt) {
+                sfx_faint();
+                g_faintBoomAt = head;
+            }
+        }
     }
 
     if (game.battlePlayhead >= game.battleLogLen) {

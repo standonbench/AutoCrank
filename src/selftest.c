@@ -867,8 +867,13 @@ void selftest_run(void) {
     // call rng_float; this guards against that class of regression.)
     {
         uint32_t before = _rng_state;
-        sfx_attack(); sfx_attack(); sfx_faint();
+        sfx_attack(); sfx_attack(); sfx_attack_hit(12); sfx_faint();
         sfx_buy(); sfx_sell(); sfx_roll(); sfx_win(); sfx_lose();
+        sfx_tick(); sfx_select(); sfx_cancel(); sfx_deny(); sfx_food();
+        sfx_freeze(); sfx_unfreeze(); sfx_pickup(); sfx_place(); sfx_shift();
+        sfx_levelup(); sfx_horn(); sfx_stamp(); sfx_bell();
+        sfx_result_win(); sfx_result_lose(); sfx_result_draw(); sfx_shatter();
+        sfx_projectile(); sfx_summon(); sfx_buff();
         check("Determinism: SFX leave sim RNG untouched", _rng_state == before);
     }
 

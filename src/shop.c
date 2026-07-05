@@ -90,7 +90,10 @@ bool shop_try_buy_pet(uint8_t shopSlot, uint8_t teamSlot) {
     game.shop.frozenPets &= (uint8_t)~(1 << shopSlot);   // freeze clears on buy
     game.shop.gold -= PET_COST;
     gold_fx(-PET_COST);
-    sfx_buy();
+    // A merge that levels up gets the arpeggio INSTEAD of the coin — the
+    // payoff sound owns the moment.
+    if (leveledUp) sfx_levelup();
+    else           sfx_buy();
 
     // Cost popup at the shop slot. Level-up burst + "Ln!" at the team slot.
     {
@@ -139,7 +142,7 @@ bool shop_try_buy_food(uint8_t shopSlot, uint8_t teamSlot) {
     game.shop.frozenFoods &= (uint8_t)~(1 << shopSlot);  // freeze clears on buy
     game.shop.gold -= cost;
     if (cost > 0) gold_fx(-cost);
-    sfx_buy();
+    sfx_food();
     {
         char buf[8];
         if (cost > 0) snprintf(buf, sizeof(buf), "-%dg", cost);
@@ -212,6 +215,8 @@ void shop_toggle_freeze_pet(uint8_t shopSlot) {
         return;
     }
     game.shop.frozenPets ^= (uint8_t)(1 << shopSlot);
+    if (game.shop.frozenPets & (1 << shopSlot)) sfx_freeze();
+    else                                        sfx_unfreeze();
 }
 
 void shop_toggle_freeze_food(uint8_t shopSlot) {
@@ -221,6 +226,8 @@ void shop_toggle_freeze_food(uint8_t shopSlot) {
         return;
     }
     game.shop.frozenFoods ^= (uint8_t)(1 << shopSlot);
+    if (game.shop.frozenFoods & (1 << shopSlot)) sfx_freeze();
+    else                                         sfx_unfreeze();
 }
 
 void shop_end_turn_advance(void) {

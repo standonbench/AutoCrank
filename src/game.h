@@ -539,12 +539,37 @@ void draw_creature_haloed(uint8_t petId, int cx, int cy, float scale,
 
 // sound.c
 void sound_init(void);
-void sfx_buy(void);
-void sfx_sell(void);
-void sfx_roll(void);
+// UI / shop
+void sfx_tick(void);        // cursor move
+void sfx_select(void);      // A-confirm
+void sfx_cancel(void);      // B-cancel
+void sfx_deny(void);        // action refused (gold / team full)
+void sfx_buy(void);         // coin ding
+void sfx_food(void);        // chomp
+void sfx_sell(void);        // hop off + refund clink
+void sfx_roll(void);        // dice rattle
+void sfx_freeze(void);
+void sfx_unfreeze(void);
+void sfx_pickup(void);      // lift pet for reorder
+void sfx_place(void);       // set pet down
+void sfx_shift(void);       // crank-reorder ratchet step
+void sfx_levelup(void);     // merge arpeggio
+// ceremony
+void sfx_horn(void);        // alphorn — battle called
+void sfx_stamp(void);       // VS rosette clank
+void sfx_bell(void);        // summit-claimed cowbell ding
+void sfx_result_win(void);
+void sfx_result_lose(void);
+void sfx_result_draw(void);
+void sfx_shatter(void);     // heart breaks on the result screen
+void sfx_win(void);         // run victory fanfare
+void sfx_lose(void);        // game-over dirge
+// battle
 void sfx_attack(void);
+void sfx_attack_hit(int dmg);   // damage-weighted impact
+void sfx_projectile(void);
 void sfx_faint(void);
-void sfx_win(void);
-void sfx_lose(void);
+void sfx_summon(void);
+void sfx_buff(void);
 
 #endif // GAME_H

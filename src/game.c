@@ -354,6 +354,7 @@ void game_advance_to_battle(void)
     th_wipe_start();
     game.state = STATE_PRE_BATTLE;
     game.preBattleTimer = 90;       // 3.0s: 30f intro + 60f hold/exit
+    sfx_horn();                     // the alphorn calls the herds to the arena
 }
 
 // Apply the battle outcome to the run — win/life tally, roster achievement
@@ -559,11 +560,12 @@ static void shop_action_a(void) {
     case ROW_SHOP_PETS: {
         uint8_t shopSlot = c;
         uint8_t petId = game.shop.pets[shopSlot];
-        if (petId == EMPTY_PET) return;
+        if (petId == EMPTY_PET) return;              // empty slot: stay silent
         int dst = first_combinable_slot(petId);
         if (dst < 0) dst = first_empty_team_slot();
-        if (dst < 0) return;  // team full and no combine target
-        shop_try_buy_pet(shopSlot, (uint8_t)dst);
+        if (dst < 0) { sfx_deny(); return; }  // team full and no combine target
+        if (!shop_try_buy_pet(shopSlot, (uint8_t)dst))
+            sfx_deny();                       // not enough gold
         break;
     }
     case ROW_SHOP_FOODS: {
@@ -572,16 +574,18 @@ static void shop_action_a(void) {
         if (foodId == EMPTY_FOOD) return;
         if (FOODS[foodId].needsTarget) {
             int dst = first_present_team_slot();
-            if (dst < 0) return;                          // nothing to feed
-            if (game.shop.gold < FOODS[foodId].cost) return;
+            if (dst < 0) { sfx_deny(); return; }          // nothing to feed
+            if (game.shop.gold < FOODS[foodId].cost) { sfx_deny(); return; }
             // Enter target-selection: snap cursor onto a team pet and let
             // the player confirm with A (or cancel with B).
             game.pendingFoodSlot = shopSlot;
             game.cursor = (uint8_t)(CUR_SHOP_FOOD_END + dst);
             game.selectedTeamSlot = 0xFF;
             game.crankShiftAccum = 0;
+            sfx_pickup();                                 // food lifted
         } else {
-            shop_try_buy_food(shopSlot, 0);               // e.g. Milk
+            if (!shop_try_buy_food(shopSlot, 0))          // e.g. Milk
+                sfx_deny();
         }
         break;
     }
@@ -589,7 +593,8 @@ static void shop_action_a(void) {
         uint8_t teamSlot = (uint8_t)(c - CUR_SHOP_FOOD_END);
         if (game.pendingFoodSlot != 0xFF) {
             if (game.player.slots[teamSlot].id == EMPTY_PET) break;
-            shop_try_buy_food(game.pendingFoodSlot, teamSlot);
+            if (!shop_try_buy_food(game.pendingFoodSlot, teamSlot))
+                sfx_deny();
             game.pendingFoodSlot = 0xFF;
             break;
         }
@@ -597,16 +602,20 @@ static void shop_action_a(void) {
         // Toggle pickup for crank-reorder.
         game.selectedTeamSlot = (game.selectedTeamSlot == teamSlot) ? 0xFF : teamSlot;
         game.crankShiftAccum = 0;
+        if (game.selectedTeamSlot != 0xFF) sfx_pickup();
+        else                               sfx_place();
         break;
     }
     case ROW_ACTIONS:
         if (c == CUR_ROLL) {
-            shop_try_roll();
+            if (!shop_try_roll()) sfx_deny();
         } else if (c == CUR_END_TURN) {
-            if (shop_should_confirm_battle())
+            if (shop_should_confirm_battle()) {
                 shop_confirm_open(CONFIRM_BATTLE, 0);
-            else
+                sfx_select();
+            } else {
                 game_advance_to_battle();
+            }
         }
         break;
     }
@@ -616,6 +625,7 @@ static void shop_action_b(void) {
     if (game.pendingFoodSlot != 0xFF) {
         // Cancel target-selection; the food stays in the shop.
         game.pendingFoodSlot = 0xFF;
+        sfx_cancel();
         return;
     }
     uint8_t c = game.cursor;
@@ -628,8 +638,10 @@ static void shop_action_b(void) {
         // B asks to sell the team pet under the cursor; the confirm modal
         // completes the sale on A (shop_confirm_accept).
         uint8_t teamSlot = (uint8_t)(game.cursor - CUR_SHOP_FOOD_END);
-        if (game.player.slots[teamSlot].id != EMPTY_PET)
+        if (game.player.slots[teamSlot].id != EMPTY_PET) {
             shop_confirm_open(CONFIRM_SELL, teamSlot);
+            sfx_select();
+        }
     }
 }
 
@@ -710,7 +722,7 @@ static void shop_input(PDButtons pressed) {
     // position; A/B do nothing until then.
     PDButtons dpad = kButtonLeft | kButtonRight | kButtonUp | kButtonDown;
     if (!game.cursorShown) {
-        if (pressed & dpad) game.cursorShown = true;
+        if (pressed & dpad) { game.cursorShown = true; sfx_tick(); }
         return;
     }
 
@@ -718,11 +730,13 @@ static void shop_input(PDButtons pressed) {
     // crank-reorder (below) are ignored until the player answers.
     if (game.confirmKind != CONFIRM_NONE) {
         if (pressed & kButtonA)      shop_confirm_accept();
-        else if (pressed & kButtonB) game.confirmKind = CONFIRM_NONE;
+        else if (pressed & kButtonB) { game.confirmKind = CONFIRM_NONE; sfx_cancel(); }
         return;
     }
 
+    uint8_t cursorBefore = game.cursor;
     shop_navigate(pressed);
+    if (game.cursor != cursorBefore) sfx_tick();
     if (pressed & kButtonA) shop_action_a();
     if (pressed & kButtonB) shop_action_b();
 
@@ -736,12 +750,14 @@ static void shop_input(PDButtons pressed) {
             if (game.selectedTeamSlot < TEAM_SIZE - 1) game.selectedTeamSlot++;
             game.cursor = (uint8_t)(CUR_SHOP_FOOD_END + game.selectedTeamSlot);
             game.crankShiftAccum -= threshold;
+            sfx_shift();
         }
         while (game.crankShiftAccum <= -threshold) {
             team_shift(game.selectedTeamSlot, -1);
             if (game.selectedTeamSlot > 0) game.selectedTeamSlot--;
             game.cursor = (uint8_t)(CUR_SHOP_FOOD_END + game.selectedTeamSlot);
             game.crankShiftAccum += threshold;
+            sfx_shift();
         }
     }
 }
@@ -792,14 +808,14 @@ int update(void* userdata)
     case STATE_SELFTEST: {
         PDButtons c2, p2, r2;
         pd->system->getButtonState(&c2, &p2, &r2);
-        if (p2 & kButtonB) { th_wipe_start(); game.state = STATE_TITLE; }
+        if (p2 & kButtonB) { th_wipe_start(); game.state = STATE_TITLE; sfx_cancel(); }
         selftest_render();
         break;
     }
     case STATE_GALLERY: {
         PDButtons c3, p3, r3;
         pd->system->getButtonState(&c3, &p3, &r3);
-        if (p3 & kButtonB) { th_wipe_start(); game.state = STATE_TITLE; }
+        if (p3 & kButtonB) { th_wipe_start(); game.state = STATE_TITLE; sfx_cancel(); }
         ui_gallery_render();
         break;
     }
