@@ -71,6 +71,7 @@ void th_pennant_garland(int x0, int x1, int y, int sag); // swaying flag string
 void th_pine(int cx, int baseY, int h);               // haloed pine tree
 void th_chalet(int x, int baseY);                     // little alpine hut
 void th_bird(int cx, int cy);                         // distant gull
+void th_cloud(int cx, int cy);                        // shaded paper-cut puff
 void th_coin(int cx, int cy);                         // 9px gold coin glyph
 void th_heart(int cx, int cy, bool filled, bool white); // 13px heart
 void th_cowbell_icon(int cx, int cy);                 // small bell glyph

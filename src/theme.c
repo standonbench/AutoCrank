@@ -516,11 +516,15 @@ void th_sign_plank(int xL, int xR, int cy, const char* label,
 // ===========================================================================
 // Backdrop
 // ===========================================================================
-static void th_cloud(int cx, int cy) {
+void th_cloud(int cx, int cy) {
     GFX_ELLIPSE(cx - 14, cy - 4, 18, 12, kColorWhite);
     GFX_ELLIPSE(cx - 4,  cy - 9, 20, 16, kColorWhite);
     GFX_ELLIPSE(cx + 8,  cy - 5, 17, 13, kColorWhite);
     GFX_ELLIPSE(cx - 8,  cy,     30, 10, kColorWhite);
+    // Shaded underbelly + a wisp beneath the crown, so the puff reads as a
+    // paper cut-out with depth instead of a flat white hole in the sky.
+    GFX_ELLIPSE(cx - 6, cy + 4, 26, 6, (LCDColor)TH_PAT_25);
+    GFX_ELLIPSE(cx - 2, cy - 2, 14, 4, (LCDColor)TH_PAT_12);
 }
 
 static void th_sun(int cx, int cy, int r) {

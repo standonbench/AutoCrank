@@ -10,6 +10,7 @@
 // Onboarding flow: true when how-to-play was opened from PLAY on a first run,
 // so dismissing it continues into the team-name picker rather than the title.
 static bool g_helpThenPlay = false;
+static void help_enter(bool thenPlay);
 
 // Integer ease-out over a frame window (shared shorthand).
 static int ease_out(int from, int to, int t, int dur) {
@@ -80,17 +81,22 @@ static void draw_snow(int elapsed) {
 // ---------------------------------------------------------------------------
 // Title screen — a festival poster. Signpost menu on the right, garlanded
 // slab banner up top, grazing herd below, one calf forever walking home.
-// titleCursor 0..4 = PLAY / HALL / ROSTER / TEST / HELP.
+// titleCursor 0..3 = PLAY / HALL / ROSTER / HELP.
 // ---------------------------------------------------------------------------
 void ui_title_update(void) {
     PDButtons cur, prs, rel;
     pd->system->getButtonState(&cur, &prs, &rel);
     game.titleBlinkTimer++;
-    if (prs & kButtonUp)
-        game.titleCursor = (uint8_t)((game.titleCursor + 4) % 5);
-    if (prs & kButtonDown)
-        game.titleCursor = (uint8_t)((game.titleCursor + 1) % 5);
+    if (prs & kButtonUp) {
+        game.titleCursor = (uint8_t)((game.titleCursor + 3) % 4);
+        sfx_tick();
+    }
+    if (prs & kButtonDown) {
+        game.titleCursor = (uint8_t)((game.titleCursor + 1) % 4);
+        sfx_tick();
+    }
     if (prs & kButtonA) {
+        sfx_select();
         switch (game.titleCursor) {
         case 0:                                   // PLAY
             // First-ever PLAY shows the how-to-play once, then continues into
@@ -108,11 +114,7 @@ void ui_title_update(void) {
             th_wipe_start();
             game.state = STATE_GALLERY;
             break;
-        case 3:
-            selftest_run();
-            game.state = STATE_SELFTEST;
-            break;
-        case 4:                                   // HELP (re-readable any time)
+        case 3:                                   // HELP (re-readable any time)
             g_helpThenPlay = false;
             th_wipe_start();
             game.state = STATE_HELP;
@@ -131,14 +133,40 @@ void ui_title_render(void) {
     lastFrame = game.frameCount;
 
     // --- backdrop: mountain photo if shipped, else the rich paper-cut scene
+    //     (whose own clouds already drift behind its ridges; no birds).
     LCDBitmap* bg = image_title_bg();
     if (bg) {
         pd->graphics->drawBitmap(bg, 0, 0, kBitmapUnflipped);
     } else {
-        th_backdrop(150, TH_BG_RICH);
+        th_backdrop(150, (uint8_t)(TH_BG_RICH & ~TH_BG_BIRDS));
         th_chalet(16, 196);
         th_pine(212, 178, 26);
         th_pine(110, 232, 30);
+    }
+
+    // --- sky life over the photo: two shaded paper-cut clouds drifting
+    //     leftward, each clipped to a pure-sky band beside the massif so
+    //     they only ever cover sky — one slides out from behind the peak,
+    //     the other vanishes behind it. Drawn before all furniture, so the
+    //     banner/garlands/signposts always overlap them.
+    if (bg) {
+        // Clip edges hug the measured massif silhouette in each cloud's
+        // altitude band (left flank ~x154, right flank ~x198), so the cut
+        // always lands on the rock edge, never mid-sky.
+        {   // left band: emerges from behind the peak, exits screen-left
+            const int span = 192;   // cx 165 -> -27; both endpoints hidden
+            int cx = 165 - (int)((game.frameCount / 4u) % (uint32_t)span);
+            pd->graphics->setClipRect(0, 0, 150, 58);
+            th_cloud(cx, 28);
+        }
+        {   // right band: enters screen-right, vanishes behind the peak
+            const int span = 242;   // cx 415 -> 173; both endpoints hidden
+            int cx = 415 - (int)((game.frameCount / 3u + 130u)
+                                 % (uint32_t)span);
+            pd->graphics->setClipRect(202, 0, SCREEN_W - 202, 50);
+            th_cloud(cx, 26);
+        }
+        pd->graphics->clearClipRect();
     }
 
     // --- wildlife on the mountain: a handful of animals bounding across
@@ -159,13 +187,21 @@ void ui_title_render(void) {
             uint8_t hopH;        // bound height in px
             uint8_t scaleQ4;     // sprite scale in 1/16ths
         } TitleHopper;
-        static const TitleHopper H[4] = {
-            { 4, -18, 150, +1, 22, 150,  800,   0, 34, 9, 12 }, // Rabbit
-            { 0, 265, 166, -1, 18, 130, 1050, 380, 26, 7, 11 }, // Squirrel
-            { 1, 275, 188, -1, 26, 180,  900, 620, 40, 8, 13 }, // Pup
-            { 4, -18, 176, +1, 24, 210, 1150, 250, 30, 8, 12 }, // Rabbit
+        // Runs start fully off-screen and runPx carries the sprite past the
+        // far edge (centre anchor, half-width ~13px) before the dead phase,
+        // so nobody pops in or vanishes mid-screen.
+        // Cadence: each critter is visible for ~55-65% of its cycle (was
+        // 25-40%), and two newcomers join, so the pasture almost always has
+        // something moving without ever reading as a stampede.
+        static const TitleHopper H[6] = {
+            { 4, -20, 150, +1, 22, 440,  540,   0, 34, 9, 12 }, // Rabbit
+            { 0, 420, 166, -1, 18, 440,  650, 380, 26, 7, 11 }, // Squirrel
+            { 1, 420, 188, -1, 26, 440,  450, 620, 40, 8, 13 }, // Pup
+            { 4, -20, 176, +1, 24, 440,  500, 250, 30, 8, 12 }, // Rabbit
+            { 7, -20, 158, +1, 20, 440,  600, 300, 30, 6, 12 }, // Goat
+            { 2, 420, 182, -1, 14, 440,  800, 150, 18, 5, 10 }, // Hen
         };
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 6; i++) {
             const TitleHopper* h = &H[i];
             int t = (int)((game.frameCount + h->phase) % h->period);
             int dist = t * h->spdQ4 / 16;
@@ -177,21 +213,21 @@ void ui_title_render(void) {
             draw_creature_haloed(h->petId, wx, wy,
                                  (float)h->scaleQ4 / 16.0f, h->dir < 0);
         }
-        int cycle = (int)(game.frameCount % 2600u);
-        int wx = SCREEN_W + 30 - (int)((float)cycle * 0.19f);
+        int cycle = (int)(game.frameCount % 1600u);
+        int wx = SCREEN_W + 30 - (int)((float)cycle * 0.32f);
         int wy = 157 + (int)(sinf((float)game.frameCount * 0.30f) * 1.2f);
         draw_creature_haloed(5, wx, wy, 0.8f, true);
     }
 
     // --- signpost menu: a pole of arrow planks pointing into the valley ---
     {
-        static const char* items[5] = { "PLAY", "HALL", "ROSTER", "TEST", "HELP" };
+        static const char* items[4] = { "PLAY", "HALL", "ROSTER", "HELP" };
         int poleX = 372;
-        GFX_FILL(poleX, 58, 5, 166, kColorBlack);                 // pole
-        pd->graphics->fillTriangle(poleX - 2, 58, poleX + 7, 58,
-                                   poleX + 2, 50, kColorBlack);   // cap
-        for (int i = 0; i < 5; i++) {
-            int cy = 78 + i * 30;
+        GFX_FILL(poleX, 74, 5, 134, kColorBlack);                 // pole
+        pd->graphics->fillTriangle(poleX - 2, 74, poleX + 7, 74,
+                                   poleX + 2, 66, kColorBlack);   // cap
+        for (int i = 0; i < 4; i++) {
+            int cy = 94 + i * 30;
             // staggered slide-in from the right on entry
             int slide = 0;
             if (entry < 60) {
@@ -225,7 +261,7 @@ void ui_title_render(void) {
         GFX_FILL(bx, by, bw, bh, kColorBlack);                     // banner
         GFX_RECT(bx + 3, by + 3, bw - 6, bh - 6, kColorWhite);
         th_text(game.fontLarge, T, (SCREEN_W - tW) / 2, by + 7, true);
-        th_chip(SCREEN_W / 2, by + bh + 9, "THE ALPINE AUTOBATTLER", true);
+        th_chip(SCREEN_W / 2, by + bh + 9, "ALPINE AUTOBATTLER", true);
     }
 
     // --- lifetime stats + control hint along the bottom ---
@@ -307,6 +343,7 @@ void ui_gameover_update(void) {
         th_wipe_start();
         game.state = STATE_TITLE;
         save_write();
+        sfx_select();
     }
 }
 
@@ -376,6 +413,7 @@ void ui_victory_update(void) {
         th_wipe_start();
         game.state = STATE_TITLE;
         save_write();
+        sfx_select();
     }
 }
 
@@ -507,6 +545,9 @@ void ui_pre_battle_update(void) {
     PDButtons cur, prs, rel;
     pd->system->getButtonState(&cur, &prs, &rel);
     if (game.preBattleTimer > 0) game.preBattleTimer--;
+    // The VS rosette finishes its stamp at elapsed 36 (timer 54) — the same
+    // frame draw_intro_animation fires its impact flash. Clank on landing.
+    if (game.preBattleTimer == 54) sfx_stamp();
     if (game.preBattleTimer == 0 || (prs & kButtonA)) {
         game.state = STATE_BATTLE;
     }
@@ -596,7 +637,24 @@ void ui_result_update(void) {
     PDButtons cur, prs, rel;
     pd->system->getButtonState(&cur, &prs, &rel);
     game.resultTimer++;
+    // Stinger when the VICTORY/DEFEAT banner stamps down (render flashes at
+    // frame 6); then the follow-up beat at 15 — the freshly-climbed summit
+    // gets a cowbell ding, a lost heart gets its shatter crack.
+    if (game.resultTimer == 6) {
+        if (game.battleResult == 0)      sfx_result_win();
+        else if (game.battleResult == 1) sfx_result_lose();
+        else                             sfx_result_draw();
+    }
+    if (game.resultTimer == 15) {
+        if (game.battleResult == 0 && game.wins > 0)
+            sfx_bell();
+        else if (game.battleResult == 1 && game.lives < STARTING_LIVES)
+            sfx_shatter();
+    }
     if (game.resultTimer > 60 && (prs & kButtonA)) {
+        // Dismiss blip only when the run continues — victory/game-over get
+        // their own full stinger from game_after_battle.
+        if (game.wins < WINS_TO_VICTORY && game.lives > 0) sfx_select();
         game_after_battle();
     }
 }
@@ -750,27 +808,32 @@ void ui_team_name_update(void) {
     if ((prs & kButtonUp) && game.nameRow == 1) {
         game.nameRow = 0;
         game.nameAdjPick = game.nameNounPick;
+        sfx_tick();
     }
     if ((prs & kButtonDown) && game.nameRow == 0) {
         game.nameRow = 1;
         game.nameNounPick = game.nameAdjPick;
+        sfx_tick();
     }
     if ((prs & kButtonLeft) && !curConfirmed) {
         if (game.nameRow == 0)
             game.nameAdjPick = (uint8_t)((game.nameAdjPick + 2) % 3);
         else
             game.nameNounPick = (uint8_t)((game.nameNounPick + 2) % 3);
+        sfx_tick();
     }
     if ((prs & kButtonRight) && !curConfirmed) {
         if (game.nameRow == 0)
             game.nameAdjPick = (uint8_t)((game.nameAdjPick + 1) % 3);
         else
             game.nameNounPick = (uint8_t)((game.nameNounPick + 1) % 3);
+        sfx_tick();
     }
 
     if (prs & kButtonA) {
         if (game.nameRow == 0 && !game.nameAdjConfirmed) {
             game.nameAdjConfirmed = 1;
+            sfx_select();
             // jump cursor down so the next A confirms the noun row.
             if (!game.nameNounConfirmed) {
                 game.nameRow = 1;
@@ -778,6 +841,7 @@ void ui_team_name_update(void) {
             }
         } else if (game.nameRow == 1 && !game.nameNounConfirmed) {
             game.nameNounConfirmed = 1;
+            sfx_select();
             if (!game.nameAdjConfirmed) {
                 game.nameRow = 0;
                 game.nameAdjPick = game.nameNounPick;
@@ -803,6 +867,7 @@ void ui_team_name_update(void) {
             th_wipe_start();
             game.state = STATE_TITLE;
         }
+        sfx_cancel();
     }
 }
 
@@ -907,19 +972,23 @@ void ui_hof_update(void) {
         if (prs & (kButtonA | kButtonB)) {
             th_wipe_start();
             game.state = STATE_TITLE;
+            sfx_cancel();
         }
         return;
     }
     if (prs & kButtonUp) {
-        if (game.hofCursor > 0) game.hofCursor--;
+        if (game.hofCursor > 0) { game.hofCursor--; sfx_tick(); }
     }
     if (prs & kButtonDown) {
-        if (game.hofCursor + 1 < game.hofCount)
+        if (game.hofCursor + 1 < game.hofCount) {
             game.hofCursor++;
+            sfx_tick();
+        }
     }
     if (prs & kButtonB) {
         th_wipe_start();
         game.state = STATE_TITLE;
+        sfx_cancel();
     }
 }
 
@@ -1017,6 +1086,7 @@ void ui_help_update(void) {
     if (prs & kButtonA) {
         game.settings |= SETTING_HELP_SEEN;
         save_write();
+        sfx_select();
         if (g_helpThenPlay) { g_helpThenPlay = false; ui_team_name_enter(); }
         else {
             th_wipe_start();
@@ -1028,6 +1098,7 @@ void ui_help_update(void) {
         g_helpThenPlay = false;
         th_wipe_start();
         game.state = STATE_TITLE;
+        sfx_cancel();
     }
 }
 
